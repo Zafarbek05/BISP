@@ -1,5 +1,7 @@
 import time
 import os
+import json
+import threading
 import subprocess
 import sys
 from watchdog.observers import Observer
@@ -18,12 +20,55 @@ WATCH_DIRECTORY = os.path.normpath(os.path.join(root_dir, "data", "raw"))
 # Paths to the scripts we want to run (also in src)
 CRAWLER_SCRIPT = os.path.join(current_script_dir, "file_crawler.py")
 VECTOR_DB_SCRIPT = os.path.join(current_script_dir, "build_vector_db.py")
+CRAWL_STATE_PATH = os.path.normpath(os.path.join(root_dir, "data", "processed", "crawl_state.json"))
+CHUNKS_PATH = os.path.normpath(os.path.join(root_dir, "data", "processed", "processed_chunks.json"))
+VECTORS_PATH = os.path.normpath(os.path.join(root_dir, "data", "processed", "vector_storage.npy"))
+
+
+def should_build_vectors():
+    if not os.path.exists(CHUNKS_PATH) or not os.path.exists(VECTORS_PATH):
+        return True
+    if not os.path.exists(CRAWL_STATE_PATH):
+        return True
+    try:
+        with open(CRAWL_STATE_PATH, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        return state.get("changed", True)
+    except Exception:
+        return True
+
+
+def run_pipeline(trigger_label=None, filepath=None):
+    if trigger_label:
+        label = f"{trigger_label}"
+        if filepath:
+            label += f": {os.path.basename(filepath)}"
+        print(f"\n[PIPELINE] Triggered by {label}")
+
+    try:
+        print("--- Running Crawler ---")
+        subprocess.run([sys.executable, CRAWLER_SCRIPT], check=True)
+
+        if should_build_vectors():
+            print("--- Running Vector Builder ---")
+            subprocess.run([sys.executable, VECTOR_DB_SCRIPT], check=True)
+        else:
+            print("--- Skipping Vector Builder (no content changes) ---")
+
+        print(">>> [SUCCESS] Pipeline update complete!")
+        return True
+    except Exception as e:
+        print(f"[ERROR] Pipeline failed: {e}")
+        return False
 
 
 class PipelineHandler(FileSystemEventHandler):
     def __init__(self):
         self.last_trigger_time = 0
-        self.debounce_seconds = 2
+        self.debounce_seconds = 5
+        self.pending_paths = set()
+        self.timer = None
+        self.lock = threading.Lock()
 
     def on_any_event(self, event):
         if event.is_directory:
@@ -33,28 +78,28 @@ class PipelineHandler(FileSystemEventHandler):
         if os.path.basename(event.src_path).startswith("~$"):
             return
 
-        if event.event_type in ['created', 'modified', 'moved']:
-            self.trigger_pipeline(event.src_path)
+        if event.event_type in ['created', 'modified', 'moved', 'deleted']:
+            self.queue_event(event)
 
-    def trigger_pipeline(self, filepath):
-        current_time = time.time()
-        if current_time - self.last_trigger_time < self.debounce_seconds:
-            return
+    def queue_event(self, event):
+        filepath = getattr(event, "dest_path", None) or event.src_path
+        with self.lock:
+            self.pending_paths.add(filepath)
+            if self.timer:
+                self.timer.cancel()
+            self.timer = threading.Timer(self.debounce_seconds, self.flush)
+            self.timer.daemon = True
+            self.timer.start()
 
-        print(f"\n[WATCHDOG] Valid change detected: {os.path.basename(filepath)}")
+    def flush(self):
+        with self.lock:
+            pending = list(self.pending_paths)
+            self.pending_paths.clear()
+            self.timer = None
 
-        # Run scripts using sys.executable to maintain the environment
-        try:
-            print(f"--- Running Crawler ---")
-            subprocess.run([sys.executable, CRAWLER_SCRIPT], check=True)
-
-            print(f"--- Running Vector Builder ---")
-            subprocess.run([sys.executable, VECTOR_DB_SCRIPT], check=True)
-
+        label = f"batched update ({len(pending)} changes)"
+        if run_pipeline(label):
             self.last_trigger_time = time.time()
-            print(">>> [SUCCESS] Pipeline automated update complete!")
-        except Exception as e:
-            print(f"[ERROR] Pipeline failed: {e}")
 
 
 if __name__ == "__main__":
@@ -63,6 +108,9 @@ if __name__ == "__main__":
         # Create it if it's missing
         os.makedirs(WATCH_DIRECTORY)
         print(f"Created folder at: {WATCH_DIRECTORY}")
+
+    print("--- Running initial pipeline update ---")
+    run_pipeline("startup")
 
     event_handler = PipelineHandler()
     observer = Observer()

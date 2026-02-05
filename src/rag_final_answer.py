@@ -1,5 +1,6 @@
 import os
 import json
+import argparse
 import numpy as np
 from google import genai
 from google.genai import types
@@ -24,25 +25,52 @@ if not api_key:
 client = genai.Client(api_key=api_key)
 CURRENT_MODEL = "gemini-2.5-flash-lite"
 
-# 1. Setup Embedding Model
-print("Initializing Embedding Model...")
-model_embed = SentenceTransformer('all-MiniLM-L6-v2')
+# 1. Setup Embedding Model (lazy)
+model_embed = None
 
-# 2. Load Processed Data
+# 2. Load Processed Data (lazy)
 chunks_path = os.path.join(PROCESSED_DATA_DIR, "processed_chunks.json")
 vectors_path = os.path.join(PROCESSED_DATA_DIR, "vector_storage.npy")
 
-if not os.path.exists(chunks_path) or not os.path.exists(vectors_path):
-    raise FileNotFoundError(f"Processed data not found in {PROCESSED_DATA_DIR}. Please run the pipeline first.")
+data_cache = {"chunks": None, "vectors": None, "chunks_mtime": None, "vectors_mtime": None}
 
-with open(chunks_path, "r", encoding='utf-8') as f:
-    all_chunks = json.load(f)
-vectors = np.load(vectors_path)
+
+def get_embedder():
+    global model_embed
+    if model_embed is None:
+        print("Initializing Embedding Model...")
+        model_embed = SentenceTransformer('all-MiniLM-L6-v2')
+    return model_embed
+
+
+def load_processed_data():
+    if not os.path.exists(chunks_path) or not os.path.exists(vectors_path):
+        raise FileNotFoundError(f"Processed data not found in {PROCESSED_DATA_DIR}. Please run the pipeline first.")
+
+    chunks_mtime = os.path.getmtime(chunks_path)
+    vectors_mtime = os.path.getmtime(vectors_path)
+
+    if (data_cache["chunks"] is not None
+            and data_cache["chunks_mtime"] == chunks_mtime
+            and data_cache["vectors_mtime"] == vectors_mtime):
+        return data_cache["chunks"], data_cache["vectors"]
+
+    with open(chunks_path, "r", encoding="utf-8") as f:
+        all_chunks = json.load(f)
+    vectors = np.load(vectors_path)
+
+    data_cache["chunks"] = all_chunks
+    data_cache["vectors"] = vectors
+    data_cache["chunks_mtime"] = chunks_mtime
+    data_cache["vectors_mtime"] = vectors_mtime
+    return all_chunks, vectors
 
 
 def get_relevant_context(query, top_k=3):
     """Finds the most semantically similar chunks from the vector database."""
-    query_vector = model_embed.encode([query])
+    model = get_embedder()
+    all_chunks, vectors = load_processed_data()
+    query_vector = model.encode([query])
 
     # Calculate cosine similarity between query and all stored vectors
     similarities = cosine_similarity(query_vector, vectors).flatten()
@@ -95,6 +123,18 @@ def ask_gemini(query):
 
 # --- TEST LOOP ---
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="RAG question answering CLI")
+    parser.add_argument(
+        "--no-interactive",
+        action="store_true",
+        help="Load models and data, then exit without starting the prompt loop.",
+    )
+    args = parser.parse_args()
+
+    if args.no_interactive:
+        print(f"RAG initialized (Powered by {CURRENT_MODEL}).")
+        raise SystemExit(0)
+
     print(f"\n--- RAG System Online (Powered by {CURRENT_MODEL}) ---")
     print("Type your question and press Enter. Type 'q' to quit.")
 
