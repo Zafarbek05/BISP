@@ -4,7 +4,7 @@ import src.chat_storage as db
 from src.rag_final_answer import ask_gemini
 
 # --- CONFIG & PATHS ---
-st.set_page_config(page_title="WIUT Academic Assistant", page_icon="🎓", layout="wide")
+st.set_page_config(page_title="Semantic Search Assistant", page_icon="🎓", layout="wide")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 RAW_DATA_DIR = os.path.join(BASE_DIR, "data", "raw")
 PROCESSED_PATH = os.path.join(BASE_DIR, "data", "processed", "vector_storage.npy")
@@ -57,7 +57,6 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- SESSION MANAGEMENT ---
-# (Keep your existing session logic exactly as is)
 if "session_id" not in st.session_state:
     sessions = db.get_sessions()
     if sessions:
@@ -104,7 +103,7 @@ def delete_current_chat():
 
 # --- SIDEBAR ---
 with st.sidebar:
-    st.title("🎓 WIUT Assistant")
+    st.title("Search Assistant")
 
     st.subheader("💬 Chat History")
 
@@ -161,38 +160,44 @@ with st.sidebar:
     else:
         st.error("🔴 System Offline")
 
-# --- MAIN HEADER ---
-col1, col2 = st.columns([6, 1])
-with col1:
-    st.title("Smart Search Assistant")
-with col2:
+# --- MAIN CHAT AREA ---
+header = st.columns([0.8, 0.2], gap="small")
+
+with header[1]:
     if st.button("🗑️", help="Delete this chat"):
         delete_current_chat()
         st.rerun()
 
-# --- CHAT DISPLAY ---
+# Display Messages
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
         if message["sources"]:
             st.caption(f"📚 Sources: {', '.join(message['sources'])}")
 
-# --- INPUT ---
+# User Input
 if prompt := st.chat_input("Ask a question..."):
-    if len(st.session_state.messages) == 0:
-        new_title = (prompt[:30] + '..') if len(prompt) > 30 else prompt
-        db.update_session_title(st.session_state.session_id, new_title)
-        st.rerun()  # Immediate rerun to update title in sidebar
-
+    # 1. Show User Message & Save to State/DB
     st.chat_message("user").markdown(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt, "sources": []})
     db.save_message(st.session_state.session_id, "user", prompt)
 
+    # 2. Generate AI Answer
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
             answer, sources = ask_gemini(prompt)
             st.markdown(answer)
             if sources:
                 st.caption(f"📚 Sources: {', '.join(sources)}")
+
+            # Save Assistant Response
             st.session_state.messages.append({"role": "assistant", "content": answer, "sources": sources})
             db.save_message(st.session_state.session_id, "assistant", answer, sources)
+
+    # 3. AUTO-TITLE LOGIC (Run this LAST)
+    # If this was the first interaction (User + AI = 2 messages), update the title
+    if len(st.session_state.messages) == 2:
+        new_title = (prompt[:30] + '..') if len(prompt) > 30 else prompt
+        db.update_session_title(st.session_state.session_id, new_title)
+
+        st.rerun()
