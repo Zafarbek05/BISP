@@ -32,7 +32,14 @@ model_embed = None
 chunks_path = os.path.join(PROCESSED_DATA_DIR, "processed_chunks.json")
 vectors_path = os.path.join(PROCESSED_DATA_DIR, "vector_storage.npy")
 
-data_cache = {"chunks": None, "vectors": None, "chunks_mtime": None, "vectors_mtime": None}
+data_cache = {
+    "chunks": None,
+    "vectors": None,
+    "chunks_mtime": None,
+    "vectors_mtime": None,
+    "chunks_size": None,
+    "vectors_size": None,
+}
 
 
 def get_embedder():
@@ -49,10 +56,14 @@ def load_processed_data():
 
     chunks_mtime = os.path.getmtime(chunks_path)
     vectors_mtime = os.path.getmtime(vectors_path)
+    chunks_size = os.path.getsize(chunks_path)
+    vectors_size = os.path.getsize(vectors_path)
 
     if (data_cache["chunks"] is not None
             and data_cache["chunks_mtime"] == chunks_mtime
-            and data_cache["vectors_mtime"] == vectors_mtime):
+            and data_cache["vectors_mtime"] == vectors_mtime
+            and data_cache["chunks_size"] == chunks_size
+            and data_cache["vectors_size"] == vectors_size):
         return data_cache["chunks"], data_cache["vectors"]
 
     with open(chunks_path, "r", encoding="utf-8") as f:
@@ -63,19 +74,24 @@ def load_processed_data():
     data_cache["vectors"] = vectors
     data_cache["chunks_mtime"] = chunks_mtime
     data_cache["vectors_mtime"] = vectors_mtime
+    data_cache["chunks_size"] = chunks_size
+    data_cache["vectors_size"] = vectors_size
     return all_chunks, vectors
 
 
-def get_relevant_context(query, top_k=3):
+def get_relevant_context(query, top_k=5):
     """Finds the most semantically similar chunks from the vector database."""
     model = get_embedder()
     all_chunks, vectors = load_processed_data()
+    if len(all_chunks) == 0:
+        return "", []
     query_vector = model.encode([query])
 
     # Calculate cosine similarity between query and all stored vectors
     similarities = cosine_similarity(query_vector, vectors).flatten()
 
     # Get indices of the top_k results
+    top_k = min(top_k, len(all_chunks))
     top_indices = similarities.argsort()[-top_k:][::-1]
 
     context_text = ""
