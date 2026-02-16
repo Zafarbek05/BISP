@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import streamlit as st
 import src.chat_storage as db
 from src.rag_final_answer import ask_gemini
@@ -101,6 +102,52 @@ def delete_current_chat():
         st.error("delete_session function missing in chat_storage.py")
 
 
+
+
+def resolve_source_path(source_name):
+    """Resolve a source label to an existing local file path when possible."""
+    if not source_name:
+        return None
+
+    source_name = str(source_name).strip()
+    candidates = []
+
+    if os.path.isabs(source_name):
+        candidates.append(source_name)
+    candidates.append(os.path.join(RAW_DATA_DIR, source_name))
+    candidates.append(os.path.join(BASE_DIR, source_name))
+
+    for candidate in candidates:
+        normalized = os.path.normpath(candidate)
+        if os.path.exists(normalized):
+            return os.path.abspath(normalized)
+    return None
+
+
+def render_sources(sources):
+    """Render exactly one source link that opens the source folder."""
+    if not sources:
+        return
+
+    for source in sources:
+        source_text = str(source).strip()
+        if not source_text:
+            continue
+
+        resolved_path = resolve_source_path(source_text)
+        label = os.path.basename(source_text) or source_text
+
+        if resolved_path and os.path.isdir(resolved_path):
+            folder_path = resolved_path
+        elif resolved_path:
+            folder_path = os.path.dirname(resolved_path)
+        else:
+            # Fall back to the raw data directory so the link still opens a folder.
+            folder_path = RAW_DATA_DIR
+
+        st.markdown(f"**Source:** [{label}]({Path(folder_path).resolve().as_uri()})")
+        return
+
 # --- SIDEBAR ---
 with st.sidebar:
     st.title("Search Assistant")
@@ -173,7 +220,7 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
         if message["sources"]:
-            st.caption(f"📚 Sources: {', '.join(message['sources'])}")
+            render_sources(message["sources"])
 
 # User Input
 if prompt := st.chat_input("Ask a question..."):
@@ -188,7 +235,7 @@ if prompt := st.chat_input("Ask a question..."):
             answer, sources = ask_gemini(prompt)
             st.markdown(answer)
             if sources:
-                st.caption(f"📚 Sources: {', '.join(sources)}")
+                render_sources(sources)
 
             # Save Assistant Response
             st.session_state.messages.append({"role": "assistant", "content": answer, "sources": sources})

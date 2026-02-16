@@ -1,7 +1,6 @@
-import sqlite3
 import json
 import os
-from datetime import datetime
+import sqlite3
 
 # Define DB Path relative to this script
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

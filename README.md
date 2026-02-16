@@ -4,3 +4,5 @@ Next steps:
 1) AI assistant for development
 2) Metadata about the folders and files
 3) Free Image Labeling model
+4) Integrate with email and other services
+5) Auths
