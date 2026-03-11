@@ -2,10 +2,6 @@ import os
 import json
 import argparse
 import numpy as np
-from google import genai
-from google.genai import types
-from sentence_transformers import SentenceTransformer
-from sklearn.metrics.pairwise import cosine_similarity
 from dotenv import load_dotenv
 
 # --- SMART PATHING ---
@@ -19,14 +15,11 @@ load_dotenv(ENV_PATH)
 api_key = os.getenv("GEMINI_API_KEY")
 
 # --- INITIALIZATION ---
-if not api_key:
-    raise ValueError("API Key not found. Please check your .env file in the root directory.")
-
-client = genai.Client(api_key=api_key)
 CURRENT_MODEL = "gemini-2.5-flash-lite"
 
 # 1. Setup Embedding Model (lazy)
 model_embed = None
+genai_client = None
 
 # 2. Load Processed Data (lazy)
 chunks_path = os.path.join(PROCESSED_DATA_DIR, "processed_chunks.json")
@@ -45,9 +38,22 @@ data_cache = {
 def get_embedder():
     global model_embed
     if model_embed is None:
+        # Lazy import to keep Streamlit startup fast.
+        from sentence_transformers import SentenceTransformer
         print("Initializing Embedding Model...")
-        model_embed = SentenceTransformer('all-MiniLM-L6-v2')
+        model_embed = SentenceTransformer("all-MiniLM-L6-v2")
     return model_embed
+
+
+def get_genai_client():
+    global genai_client
+    if genai_client is None:
+        if not api_key:
+            raise ValueError("API Key not found. Please check your .env file in the root directory.")
+        # Lazy import to reduce import-time overhead.
+        from google import genai
+        genai_client = genai.Client(api_key=api_key)
+    return genai_client
 
 
 def load_processed_data():
@@ -86,9 +92,15 @@ def get_relevant_context(query, top_k=5):
     if len(all_chunks) == 0:
         return "", []
     query_vector = model.encode([query])
+    query_vector = np.asarray(query_vector)
+    if query_vector.ndim == 2 and query_vector.shape[0] == 1:
+        query_vector = query_vector[0]
 
-    # Calculate cosine similarity between query and all stored vectors
-    similarities = cosine_similarity(query_vector, vectors).flatten()
+    # Calculate cosine similarity without sklearn to avoid heavy import cost.
+    vnorms = np.linalg.norm(vectors, axis=1)
+    qnorm = np.linalg.norm(query_vector)
+    denom = (vnorms * qnorm) + 1e-12
+    similarities = (vectors @ query_vector) / denom
 
     # Get indices of the top_k results
     top_k = min(top_k, len(all_chunks))
@@ -125,6 +137,10 @@ def ask_gemini(query):
     """
 
     # Generate response using the 2026 google-genai SDK
+    client = get_genai_client()
+    # Lazy import here to avoid overhead at module import time.
+    from google.genai import types
+
     response = client.models.generate_content(
         model=CURRENT_MODEL,
         contents=prompt,
