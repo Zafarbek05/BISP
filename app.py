@@ -1,4 +1,5 @@
 import os
+import sqlite3
 from pathlib import Path
 import streamlit as st
 import src.chat_storage as db
@@ -58,26 +59,96 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- SESSION MANAGEMENT ---
-if "session_id" not in st.session_state:
-    sessions = db.get_sessions()
-    if sessions:
-        st.session_state.session_id = sessions[0][0]
-        st.session_state.messages = db.get_messages(st.session_state.session_id)
+# --- AUTH ---
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+    st.session_state.user_id = None
+    st.session_state.username = None
+    st.session_state.role = None
+
+
+def logout():
+    for key in ["authenticated", "user_id", "username", "role", "session_id", "messages"]:
+        if key in st.session_state:
+            del st.session_state[key]
+    st.rerun()
+
+
+def show_login():
+    st.title("Login")
+
+    if db.get_user_count() == 0:
+        st.info("No users found. Create the first admin account.")
+        with st.form("create_admin"):
+            username = st.text_input("Admin username")
+            password = st.text_input("Password", type="password")
+            confirm = st.text_input("Confirm password", type="password")
+            submitted = st.form_submit_button("Create admin")
+
+        if submitted:
+            if not username or not password:
+                st.error("Username and password are required.")
+            elif password != confirm:
+                st.error("Passwords do not match.")
+            else:
+                try:
+                    user_id = db.create_user(username, password, role="admin")
+                    db.assign_legacy_sessions(user_id)
+                    st.success("Admin account created. Please log in.")
+                    st.rerun()
+                except sqlite3.IntegrityError:
+                    st.error("Username already exists.")
     else:
-        st.session_state.session_id = db.create_session(title="New Chat")
-        st.session_state.messages = []
-elif "messages" not in st.session_state:
-    st.session_state.messages = db.get_messages(st.session_state.session_id)
+        with st.form("login_form"):
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Login")
+
+        if submitted:
+            user = db.verify_user(username, password)
+            if user:
+                st.session_state.authenticated = True
+                st.session_state.user_id = user["id"]
+                st.session_state.username = user["username"]
+                st.session_state.role = user["role"]
+                for key in ["session_id", "messages"]:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                st.rerun()
+            else:
+                st.error("Invalid username or password.")
+
+
+if not st.session_state.authenticated:
+    show_login()
+    st.stop()
+
+# --- SESSION MANAGEMENT ---
+def ensure_active_session():
+    user_id = st.session_state.user_id
+    sessions = db.get_sessions(user_id)
+    current_id = st.session_state.get("session_id")
+    if current_id is None or not db.session_belongs_to_user(current_id, user_id):
+        if sessions:
+            st.session_state.session_id = sessions[0][0]
+            st.session_state.messages = db.get_messages(st.session_state.session_id, user_id)
+        else:
+            st.session_state.session_id = db.create_session(title="New Chat", user_id=user_id)
+            st.session_state.messages = []
+    elif "messages" not in st.session_state:
+        st.session_state.messages = db.get_messages(current_id, user_id)
+
+
+ensure_active_session()
 
 
 def load_chat(session_id):
     st.session_state.session_id = session_id
-    st.session_state.messages = db.get_messages(session_id)
+    st.session_state.messages = db.get_messages(session_id, st.session_state.user_id)
 
 
 def new_chat():
-    new_id = db.create_session(title="New Chat")
+    new_id = db.create_session(title="New Chat", user_id=st.session_state.user_id)
     st.session_state.session_id = new_id
     st.session_state.messages = []
 
@@ -89,14 +160,17 @@ def truncate_title(title, max_len=28):
 
 
 def delete_current_chat():
+    if st.session_state.role != "admin":
+        st.warning("Only admins can delete chats.")
+        return
     current_id = st.session_state.session_id
     # Ensure delete_session exists in your DB script, otherwise handle error
     if hasattr(db, "delete_session"):
-        db.delete_session(current_id)
-        remaining = db.get_sessions()
+        db.delete_session(current_id, st.session_state.user_id)
+        remaining = db.get_sessions(st.session_state.user_id)
         if remaining:
             st.session_state.session_id = remaining[0][0]
-            st.session_state.messages = db.get_messages(st.session_state.session_id)
+            st.session_state.messages = db.get_messages(st.session_state.session_id, st.session_state.user_id)
         else:
             new_chat()
     else:
@@ -150,6 +224,9 @@ def render_sources(sources):
 # --- SIDEBAR ---
 with st.sidebar:
     st.title("Search Assistant")
+    st.caption(f"Signed in as {st.session_state.username} ({st.session_state.role})")
+    if st.button("Logout", use_container_width=True):
+        logout()
 
     st.subheader("💬 Chat History")
 
@@ -161,11 +238,11 @@ with st.sidebar:
     st.markdown("---")  # Divider
 
     # SESSION LIST
-    sessions = db.get_sessions()
+    sessions = db.get_sessions(st.session_state.user_id)
     for s_id, s_title, s_time in sessions:
         # Skip empty new chats to keep list clean
         if s_title == "New Chat" and hasattr(db, "get_session_message_count") and db.get_session_message_count(
-                s_id) == 0:
+                s_id, st.session_state.user_id) == 0:
             if s_id != st.session_state.session_id:
                 continue
 
@@ -181,24 +258,48 @@ with st.sidebar:
     # KNOWLEDGE BASE
     st.subheader("⚙️ Knowledge Base")
     with st.expander("Upload & Refresh"):
-        uploaded_files = st.file_uploader("Upload Docs", accept_multiple_files=True)
-        if uploaded_files:
-            for f in uploaded_files:
-                with open(os.path.join(RAW_DATA_DIR, f.name), "wb") as w:
-                    w.write(f.getbuffer())
-            st.success("Files uploaded!")
+        if st.session_state.role != "admin":
+            st.info("Admin only.")
+        else:
+            uploaded_files = st.file_uploader("Upload Docs", accept_multiple_files=True)
+            if uploaded_files:
+                for f in uploaded_files:
+                    with open(os.path.join(RAW_DATA_DIR, f.name), "wb") as w:
+                        w.write(f.getbuffer())
+                st.success("Files uploaded!")
 
-        if st.button("🔄 Force Refresh", use_container_width=True):
-            import subprocess, sys
+            if st.button("🔄 Force Refresh", use_container_width=True):
+                import subprocess, sys
 
-            crawler = os.path.join(BASE_DIR, "src", "file_crawler.py")
-            vector_db = os.path.join(BASE_DIR, "src", "build_vector_db.py")
-            try:
-                subprocess.run([sys.executable, crawler], check=True)
-                subprocess.run([sys.executable, vector_db], check=True)
-                st.success("Refreshed!")
-            except Exception as e:
-                st.error(str(e))
+                crawler = os.path.join(BASE_DIR, "src", "file_crawler.py")
+                vector_db = os.path.join(BASE_DIR, "src", "build_vector_db.py")
+                try:
+                    subprocess.run([sys.executable, crawler], check=True)
+                    subprocess.run([sys.executable, vector_db], check=True)
+                    st.success("Refreshed!")
+                except Exception as e:
+                    st.error(str(e))
+
+    # USER MANAGEMENT (ADMIN)
+    if st.session_state.role == "admin":
+        st.subheader("Users")
+        with st.expander("Create User"):
+            with st.form("create_user"):
+                new_username = st.text_input("Username", key="new_user_username")
+                new_password = st.text_input("Password", type="password", key="new_user_password")
+                new_role = st.selectbox("Role", ["user", "admin"], index=0, key="new_user_role")
+                submitted = st.form_submit_button("Create user")
+            if submitted:
+                if not new_username or not new_password:
+                    st.error("Username and password are required.")
+                else:
+                    try:
+                        db.create_user(new_username, new_password, role=new_role)
+                        st.success("User created.")
+                    except sqlite3.IntegrityError:
+                        st.error("Username already exists.")
+                    except ValueError as exc:
+                        st.error(str(exc))
 
     # STATUS
     if os.path.exists(PROCESSED_PATH) and os.path.exists(PROCESSED_DB_PATH):
@@ -210,9 +311,12 @@ with st.sidebar:
 header = st.columns([0.8, 0.2], gap="small")
 
 with header[1]:
-    if st.button("🗑️", help="Delete this chat"):
-        delete_current_chat()
-        st.rerun()
+    if st.session_state.role == "admin":
+        if st.button("🗑️", help="Delete this chat"):
+            delete_current_chat()
+            st.rerun()
+    else:
+        st.button("🗑️", help="Admins only", disabled=True)
 
 # Display Messages
 for message in st.session_state.messages:
@@ -226,7 +330,7 @@ if prompt := st.chat_input("Ask a question..."):
     # 1. Show User Message & Save to State/DB
     st.chat_message("user").markdown(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt, "sources": []})
-    db.save_message(st.session_state.session_id, "user", prompt)
+    db.save_message(st.session_state.session_id, "user", prompt, user_id=st.session_state.user_id)
 
     # 2. Generate AI Answer
     with st.chat_message("assistant"):
@@ -238,12 +342,14 @@ if prompt := st.chat_input("Ask a question..."):
 
             # Save Assistant Response
             st.session_state.messages.append({"role": "assistant", "content": answer, "sources": sources})
-            db.save_message(st.session_state.session_id, "assistant", answer, sources)
+            db.save_message(st.session_state.session_id, "assistant", answer, sources, user_id=st.session_state.user_id)
 
     # 3. AUTO-TITLE LOGIC (Run this LAST)
     # If this was the first interaction (User + AI = 2 messages), update the title
     if len(st.session_state.messages) == 2:
         new_title = (prompt[:30] + '..') if len(prompt) > 30 else prompt
-        db.update_session_title(st.session_state.session_id, new_title)
+        db.update_session_title(st.session_state.session_id, new_title, st.session_state.user_id)
 
         st.rerun()
+
+

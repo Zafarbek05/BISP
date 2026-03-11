@@ -18,13 +18,13 @@ load_dotenv(ENV_PATH)
 api_key = os.getenv("GEMINI_API_KEY")
 
 # --- INITIALIZATION ---
-CURRENT_MODEL = "gemini-2.5-flash-lite"
+CURRENT_MODEL = "gemini-2.5-flash"
 
-# 1. Setup Embedding Model (lazy)
+# 1. Setup Embedding Model
 model_embed = None
 genai_client = None
 
-# 2. Load Processed Data (lazy)
+# 2. Load Processed Data
 db_path = storage.get_db_path()
 vectors_path = os.path.join(PROCESSED_DATA_DIR, "vector_storage.npy")
 
