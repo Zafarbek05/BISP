@@ -1,16 +1,15 @@
-import json
 import os
 import hashlib
 from docx import Document
 from pypdf import PdfReader
+try:
+    from . import processed_storage as storage
+except ImportError:
+    import processed_storage as storage
 
 # --- ANCHOR PATHING ---
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RAW_DATA_DIR = os.path.join(BASE_DIR, "data", "raw")
-PROCESSED_DATA_DIR = os.path.join(BASE_DIR, "data", "processed")
-CHUNK_DIR = os.path.join(PROCESSED_DATA_DIR, "chunks")
-MANIFEST_PATH = os.path.join(PROCESSED_DATA_DIR, "file_manifest.json")
-CRAWL_STATE_PATH = os.path.join(PROCESSED_DATA_DIR, "crawl_state.json")
 
 # --- CONFIGURATION ---
 CHUNK_SIZE = 1000
@@ -77,28 +76,16 @@ def sha256_text(text):
     return hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()
 
 
-def file_id_from_path(path):
-    return hashlib.sha1(path.lower().encode("utf-8", errors="ignore")).hexdigest()
-
-
 def load_manifest():
-    if not os.path.exists(MANIFEST_PATH):
-        return {"files": {}}
-    with open(MANIFEST_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+    return storage.load_manifest()
 
 
 def save_manifest(manifest):
-    if not os.path.exists(PROCESSED_DATA_DIR):
-        os.makedirs(PROCESSED_DATA_DIR)
-    with open(MANIFEST_PATH, "w", encoding="utf-8") as f:
-        json.dump(manifest, f, indent=4)
+    storage.save_manifest(manifest)
 
 
 def save_crawl_state(changed):
-    state = {"changed": changed}
-    with open(CRAWL_STATE_PATH, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=4)
+    storage.save_crawl_state(changed)
 
 
 def iter_raw_files(root_dir):
@@ -125,12 +112,7 @@ def build_chunk_records(filepath, content):
 
 
 if __name__ == "__main__":
-    # Ensure processed directory exists
-    if not os.path.exists(PROCESSED_DATA_DIR):
-        os.makedirs(PROCESSED_DATA_DIR)
-
-    if not os.path.exists(CHUNK_DIR):
-        os.makedirs(CHUNK_DIR)
+    storage.init_db()
 
     print(f"Scanning folder: {RAW_DATA_DIR}...")
     manifest = load_manifest()
@@ -150,15 +132,15 @@ if __name__ == "__main__":
 
         content = get_file_content(filepath)
         if content is None:
+            storage.delete_chunks_for_file(filepath)
             new_manifest["files"][filepath] = {
                 "path": filepath,
                 "name": os.path.basename(filepath),
                 "mtime": stat.st_mtime,
                 "size": stat.st_size,
-                "content_hash": None,
-                "chunk_file": None
+                "content_hash": None
             }
-            if not existing_entry:
+            if not existing_entry or existing_entry.get("content_hash") is not None:
                 changed = True
             continue
 
@@ -170,30 +152,20 @@ if __name__ == "__main__":
             continue
 
         chunk_records = build_chunk_records(filepath, content)
-        chunk_file = (existing_entry or {}).get("chunk_file") or os.path.join("chunks", f"{file_id_from_path(filepath)}.json")
-        chunk_path = os.path.join(PROCESSED_DATA_DIR, chunk_file)
-
-        with open(chunk_path, "w", encoding="utf-8") as f:
-            json.dump(chunk_records, f, indent=4)
+        storage.save_chunks_for_file(filepath, chunk_records)
 
         new_manifest["files"][filepath] = {
             "path": filepath,
             "name": os.path.basename(filepath),
             "mtime": stat.st_mtime,
             "size": stat.st_size,
-            "content_hash": content_hash,
-            "chunk_file": chunk_file
+            "content_hash": content_hash
         }
         changed = True
 
-    for filepath, entry in existing_files.items():
+    for filepath in existing_files.keys():
         if filepath in current_paths:
             continue
-        chunk_file = entry.get("chunk_file")
-        if chunk_file:
-            chunk_path = os.path.join(PROCESSED_DATA_DIR, chunk_file)
-            if os.path.exists(chunk_path):
-                os.remove(chunk_path)
         changed = True
 
     save_manifest(new_manifest)

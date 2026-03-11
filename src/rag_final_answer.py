@@ -1,8 +1,11 @@
 import os
-import json
 import argparse
 import numpy as np
 from dotenv import load_dotenv
+try:
+    from . import processed_storage as storage
+except ImportError:
+    import processed_storage as storage
 
 # --- SMART PATHING ---
 # Gets the 'src' folder, then goes up to the Project Root
@@ -22,15 +25,15 @@ model_embed = None
 genai_client = None
 
 # 2. Load Processed Data (lazy)
-chunks_path = os.path.join(PROCESSED_DATA_DIR, "processed_chunks.json")
+db_path = storage.get_db_path()
 vectors_path = os.path.join(PROCESSED_DATA_DIR, "vector_storage.npy")
 
 data_cache = {
     "chunks": None,
     "vectors": None,
-    "chunks_mtime": None,
+    "db_mtime": None,
     "vectors_mtime": None,
-    "chunks_size": None,
+    "db_size": None,
     "vectors_size": None,
 }
 
@@ -57,30 +60,29 @@ def get_genai_client():
 
 
 def load_processed_data():
-    if not os.path.exists(chunks_path) or not os.path.exists(vectors_path):
+    if not os.path.exists(db_path) or not os.path.exists(vectors_path):
         raise FileNotFoundError(f"Processed data not found in {PROCESSED_DATA_DIR}. Please run the pipeline first.")
 
-    chunks_mtime = os.path.getmtime(chunks_path)
+    db_mtime = os.path.getmtime(db_path)
     vectors_mtime = os.path.getmtime(vectors_path)
-    chunks_size = os.path.getsize(chunks_path)
+    db_size = os.path.getsize(db_path)
     vectors_size = os.path.getsize(vectors_path)
 
     if (data_cache["chunks"] is not None
-            and data_cache["chunks_mtime"] == chunks_mtime
+            and data_cache["db_mtime"] == db_mtime
             and data_cache["vectors_mtime"] == vectors_mtime
-            and data_cache["chunks_size"] == chunks_size
+            and data_cache["db_size"] == db_size
             and data_cache["vectors_size"] == vectors_size):
         return data_cache["chunks"], data_cache["vectors"]
 
-    with open(chunks_path, "r", encoding="utf-8") as f:
-        all_chunks = json.load(f)
+    all_chunks = storage.get_all_chunks()
     vectors = np.load(vectors_path)
 
     data_cache["chunks"] = all_chunks
     data_cache["vectors"] = vectors
-    data_cache["chunks_mtime"] = chunks_mtime
+    data_cache["db_mtime"] = db_mtime
     data_cache["vectors_mtime"] = vectors_mtime
-    data_cache["chunks_size"] = chunks_size
+    data_cache["db_size"] = db_size
     data_cache["vectors_size"] = vectors_size
     return all_chunks, vectors
 

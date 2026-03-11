@@ -9,6 +9,7 @@ st.set_page_config(page_title="Semantic Search Assistant", page_icon="🎓", lay
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 RAW_DATA_DIR = os.path.join(BASE_DIR, "data", "raw")
 PROCESSED_PATH = os.path.join(BASE_DIR, "data", "processed", "vector_storage.npy")
+PROCESSED_DB_PATH = os.path.join(BASE_DIR, "data", "processed", "processed_data.db")
 
 if not os.path.exists(RAW_DATA_DIR):
     os.makedirs(RAW_DATA_DIR)
@@ -100,8 +101,6 @@ def delete_current_chat():
             new_chat()
     else:
         st.error("delete_session function missing in chat_storage.py")
-
-
 
 
 def resolve_source_path(source_name):
@@ -202,7 +201,7 @@ with st.sidebar:
                 st.error(str(e))
 
     # STATUS
-    if os.path.exists(PROCESSED_PATH):
+    if os.path.exists(PROCESSED_PATH) and os.path.exists(PROCESSED_DB_PATH):
         st.success("🟢 System Online")
     else:
         st.error("🔴 System Offline")

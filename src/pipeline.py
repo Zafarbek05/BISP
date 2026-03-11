@@ -1,11 +1,14 @@
 import time
 import os
-import json
 import threading
 import subprocess
 import sys
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+try:
+    from . import processed_storage as storage
+except ImportError:
+    import processed_storage as storage
 
 # --- SMART PATH LOGIC ---
 # 1. Get the directory where THIS script is (the 'src' folder)
@@ -20,20 +23,20 @@ WATCH_DIRECTORY = os.path.normpath(os.path.join(root_dir, "data", "raw"))
 # Paths to the scripts we want to run (also in src)
 CRAWLER_SCRIPT = os.path.join(current_script_dir, "file_crawler.py")
 VECTOR_DB_SCRIPT = os.path.join(current_script_dir, "build_vector_db.py")
-CRAWL_STATE_PATH = os.path.normpath(os.path.join(root_dir, "data", "processed", "crawl_state.json"))
-CHUNKS_PATH = os.path.normpath(os.path.join(root_dir, "data", "processed", "processed_chunks.json"))
 VECTORS_PATH = os.path.normpath(os.path.join(root_dir, "data", "processed", "vector_storage.npy"))
 
 
 def should_build_vectors():
-    if not os.path.exists(CHUNKS_PATH) or not os.path.exists(VECTORS_PATH):
+    if not os.path.exists(VECTORS_PATH):
         return True
-    if not os.path.exists(CRAWL_STATE_PATH):
+    db_path = storage.get_db_path()
+    if not os.path.exists(db_path):
         return True
     try:
-        with open(CRAWL_STATE_PATH, "r", encoding="utf-8") as f:
-            state = json.load(f)
-        return state.get("changed", True)
+        changed = storage.get_crawl_state()
+        if changed is None:
+            return True
+        return changed
     except Exception:
         return True
 
