@@ -10,10 +10,14 @@ try:
     from . import processed_storage as storage
 except ImportError:
     import processed_storage as storage
+try:
+    from . import settings_manager as settings_manager
+except ImportError:
+    import settings_manager as settings_manager
 
 # --- ANCHOR PATHING ---
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RAW_DATA_DIR = os.path.join(BASE_DIR, "data", "raw")
+DEFAULT_RAW_DATA_DIR = os.path.join(BASE_DIR, "data", "raw")
 
 # --- CONFIGURATION ---
 CHUNK_SIZE = 1000
@@ -115,57 +119,77 @@ def build_chunk_records(filepath, content):
     return records
 
 
+def get_crawl_roots():
+    settings = settings_manager.load_settings()
+    return settings_manager.get_effective_crawler_folders(settings, DEFAULT_RAW_DATA_DIR, base_dir=BASE_DIR)
+
+
 if __name__ == "__main__":
     storage.init_db()
 
-    print(f"Scanning folder: {RAW_DATA_DIR}...")
+    roots = get_crawl_roots()
+    valid_roots = []
+    for root in roots:
+        if os.path.exists(root):
+            valid_roots.append(root)
+        else:
+            print(f"Warning: folder not found, skipping: {root}")
+
+    if not valid_roots:
+        os.makedirs(DEFAULT_RAW_DATA_DIR, exist_ok=True)
+        valid_roots = [DEFAULT_RAW_DATA_DIR]
+
+    print("Scanning folder(s):")
+    for root in valid_roots:
+        print(f"- {root}")
     manifest = load_manifest()
     existing_files = manifest.get("files", {})
     new_manifest = {"files": {}}
     changed = False
 
     current_paths = set()
-    for filepath in iter_raw_files(RAW_DATA_DIR):
-        current_paths.add(filepath)
-        stat = os.stat(filepath)
-        existing_entry = existing_files.get(filepath)
+    for root_dir in valid_roots:
+        for filepath in iter_raw_files(root_dir):
+            current_paths.add(filepath)
+            stat = os.stat(filepath)
+            existing_entry = existing_files.get(filepath)
 
-        if existing_entry and existing_entry.get("mtime") == stat.st_mtime and existing_entry.get("size") == stat.st_size:
-            new_manifest["files"][filepath] = existing_entry
-            continue
+            if existing_entry and existing_entry.get("mtime") == stat.st_mtime and existing_entry.get("size") == stat.st_size:
+                new_manifest["files"][filepath] = existing_entry
+                continue
 
-        content = get_file_content(filepath)
-        if content is None:
-            storage.delete_chunks_for_file(filepath)
+            content = get_file_content(filepath)
+            if content is None:
+                storage.delete_chunks_for_file(filepath)
+                new_manifest["files"][filepath] = {
+                    "path": filepath,
+                    "name": os.path.basename(filepath),
+                    "mtime": stat.st_mtime,
+                    "size": stat.st_size,
+                    "content_hash": None
+                }
+                if not existing_entry or existing_entry.get("content_hash") is not None:
+                    changed = True
+                continue
+
+            content_hash = sha256_text(content)
+            if existing_entry and existing_entry.get("content_hash") == content_hash:
+                existing_entry["mtime"] = stat.st_mtime
+                existing_entry["size"] = stat.st_size
+                new_manifest["files"][filepath] = existing_entry
+                continue
+
+            chunk_records = build_chunk_records(filepath, content)
+            storage.save_chunks_for_file(filepath, chunk_records)
+
             new_manifest["files"][filepath] = {
                 "path": filepath,
                 "name": os.path.basename(filepath),
                 "mtime": stat.st_mtime,
                 "size": stat.st_size,
-                "content_hash": None
+                "content_hash": content_hash
             }
-            if not existing_entry or existing_entry.get("content_hash") is not None:
-                changed = True
-            continue
-
-        content_hash = sha256_text(content)
-        if existing_entry and existing_entry.get("content_hash") == content_hash:
-            existing_entry["mtime"] = stat.st_mtime
-            existing_entry["size"] = stat.st_size
-            new_manifest["files"][filepath] = existing_entry
-            continue
-
-        chunk_records = build_chunk_records(filepath, content)
-        storage.save_chunks_for_file(filepath, chunk_records)
-
-        new_manifest["files"][filepath] = {
-            "path": filepath,
-            "name": os.path.basename(filepath),
-            "mtime": stat.st_mtime,
-            "size": stat.st_size,
-            "content_hash": content_hash
-        }
-        changed = True
+            changed = True
 
     for filepath in existing_files.keys():
         if filepath in current_paths:

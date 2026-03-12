@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "crawler": {
+    "folders": []
+  },
+  "pipeline": {
+    "refresh_request_id": 0,
+    "last_refresh_id": 0,
+    "last_refresh_at": null,
+    "last_refresh_status": null,
+    "last_refresh_error": null,
+    "refresh_requested_by": null,
+    "refresh_requested_at": null
+  }
+}

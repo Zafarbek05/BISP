@@ -13,6 +13,10 @@ try:
     from . import processed_storage as storage
 except ImportError:
     import processed_storage as storage
+try:
+    from . import settings_manager as settings_manager
+except ImportError:
+    import settings_manager as settings_manager
 
 # --- SMART PATH LOGIC ---
 # 1. Get the directory where THIS script is (the 'src' folder)
@@ -22,7 +26,7 @@ current_script_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.dirname(current_script_dir)
 
 # 3. Define the path to data/raw in the root
-WATCH_DIRECTORY = os.path.normpath(os.path.join(root_dir, "data", "raw"))
+DEFAULT_WATCH_DIRECTORY = os.path.normpath(os.path.join(root_dir, "data", "raw"))
 
 # Paths to the scripts we want to run (also in src)
 CRAWLER_SCRIPT = os.path.join(current_script_dir, "file_crawler.py")
@@ -63,10 +67,59 @@ def run_pipeline(trigger_label=None, filepath=None):
             print("--- Skipping Vector Builder (no content changes) ---")
 
         print(">>> [SUCCESS] Pipeline update complete!")
-        return True
+        return True, None
     except Exception as e:
         print(f"[ERROR] Pipeline failed: {e}")
+        return False, str(e)
+
+
+def get_watch_directories():
+    settings = settings_manager.load_settings()
+    return settings_manager.get_effective_crawler_folders(
+        settings,
+        DEFAULT_WATCH_DIRECTORY,
+        base_dir=root_dir
+    )
+
+
+def ensure_watch_directories(directories):
+    valid = []
+    for directory in directories:
+        if os.path.exists(directory):
+            valid.append(directory)
+        else:
+            print(f"Warning: watch directory not found, skipping: {directory}")
+
+    if not valid:
+        os.makedirs(DEFAULT_WATCH_DIRECTORY, exist_ok=True)
+        valid = [DEFAULT_WATCH_DIRECTORY]
+    return valid
+
+
+def apply_watch_directories(observer, handler, directories):
+    observer.unschedule_all()
+    for directory in directories:
+        observer.schedule(handler, directory, recursive=True)
+
+
+def handle_refresh_request(settings):
+    pipeline_settings = settings.get("pipeline", {})
+    request_id = int(pipeline_settings.get("refresh_request_id") or 0)
+    last_id = int(pipeline_settings.get("last_refresh_id") or 0)
+    if request_id <= last_id:
         return False
+
+    success, error = run_pipeline("manual refresh")
+    status_patch = {
+        "pipeline": {
+            "last_refresh_id": request_id,
+            "last_refresh_at": int(time.time()),
+            "last_refresh_status": "success" if success else "error",
+            "last_refresh_error": error,
+        }
+    }
+    settings_manager.update_settings(status_patch)
+    return True
 
 
 class PipelineHandler(FileSystemEventHandler):
@@ -105,31 +158,45 @@ class PipelineHandler(FileSystemEventHandler):
             self.timer = None
 
         label = f"batched update ({len(pending)} changes)"
-        if run_pipeline(label):
+        success, _ = run_pipeline(label)
+        if success:
             self.last_trigger_time = time.time()
 
 
 if __name__ == "__main__":
-    if not os.path.exists(WATCH_DIRECTORY):
-        print(f"Error: Directory NOT found at {WATCH_DIRECTORY}")
-        # Create it if it's missing
-        os.makedirs(WATCH_DIRECTORY)
-        print(f"Created folder at: {WATCH_DIRECTORY}")
+    event_handler = PipelineHandler()
+    observer = Observer()
+    watch_directories = ensure_watch_directories(get_watch_directories())
+    apply_watch_directories(observer, event_handler, watch_directories)
 
     print("--- Running initial pipeline update ---")
     run_pipeline("startup")
 
-    event_handler = PipelineHandler()
-    observer = Observer()
-    observer.schedule(event_handler, WATCH_DIRECTORY, recursive=False)
-
-    print(f"--- RAG Pipeline Watcher Active ---")
-    print(f"Watching: {WATCH_DIRECTORY}")
+    print("--- RAG Pipeline Watcher Active ---")
+    for directory in watch_directories:
+        print(f"Watching: {directory}")
 
     observer.start()
     try:
         while True:
             time.sleep(1)
+            settings = settings_manager.load_settings()
+            desired_directories = ensure_watch_directories(
+                settings_manager.get_effective_crawler_folders(
+                    settings,
+                    DEFAULT_WATCH_DIRECTORY,
+                    base_dir=root_dir
+                )
+            )
+            if desired_directories != watch_directories:
+                watch_directories = desired_directories
+                apply_watch_directories(observer, event_handler, watch_directories)
+                print("--- Watch folders updated ---")
+                for directory in watch_directories:
+                    print(f"Watching: {directory}")
+                run_pipeline("watch folders updated")
+
+            handle_refresh_request(settings)
     except KeyboardInterrupt:
         observer.stop()
     observer.join()

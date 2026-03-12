@@ -112,9 +112,9 @@ def get_relevant_context(query, top_k=5):
     for idx in top_indices:
         context_text += f"\n--- SOURCE FILE: {all_chunks[idx]['source']} ---\n"
         context_text += f"CONTENT: {all_chunks[idx]['content']}\n"
-        sources.append(all_chunks[idx]['source'])
+        sources.append(all_chunks[idx].get("path") or all_chunks[idx]["source"])
 
-    return context_text, list(set(sources))
+    return context_text, list(dict.fromkeys(sources))
 
 
 def ask_gemini(query):

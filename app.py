@@ -1,12 +1,15 @@
 import os
 import time
 import mimetypes
+import subprocess
+import sys
 from pathlib import Path
 import streamlit as st
 import src.chat_storage as db
 import src.env_loader
 import src.processed_storage as processed_storage
 import src.rag_final_answer as rag_final_answer
+import src.settings_manager as settings_manager
 
 # --- CONFIG & PATHS ---
 st.set_page_config(page_title="Semantic Search Assistant", page_icon="🎓", layout="wide")
@@ -310,6 +313,55 @@ def validate_upload(filename, file_bytes):
     return True, actual_mime
 
 
+def format_timestamp(epoch_seconds):
+    if not epoch_seconds:
+        return "Never"
+    try:
+        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(epoch_seconds))
+    except Exception:
+        return "Unknown"
+
+
+def open_in_explorer(path):
+    if not path:
+        return
+    target = os.path.abspath(path)
+    try:
+        if sys.platform.startswith("win"):
+            if os.path.isdir(target):
+                subprocess.Popen(["explorer", target])
+            else:
+                subprocess.Popen(["explorer", "/select,", target])
+        elif sys.platform == "darwin":
+            if os.path.isdir(target):
+                subprocess.Popen(["open", target])
+            else:
+                subprocess.Popen(["open", "-R", target])
+        else:
+            folder = target if os.path.isdir(target) else os.path.dirname(target)
+            subprocess.Popen(["xdg-open", folder])
+    except Exception as exc:
+        st.error(f"Failed to open folder: {exc}")
+
+
+def open_native_file(path):
+    if not path:
+        return
+    target = os.path.abspath(path)
+    if not os.path.exists(target):
+        st.error("File not found.")
+        return
+    try:
+        if sys.platform.startswith("win"):
+            os.startfile(target)
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", target])
+        else:
+            subprocess.Popen(["xdg-open", target])
+    except Exception as exc:
+        st.error(f"Failed to open file: {exc}")
+
+
 def resolve_source_path(source_name):
     """Resolve a source label to an existing local file path when possible."""
     if not source_name:
@@ -322,37 +374,97 @@ def resolve_source_path(source_name):
         candidates.append(source_name)
     candidates.append(os.path.join(RAW_DATA_DIR, source_name))
     candidates.append(os.path.join(BASE_DIR, source_name))
+    try:
+        settings = settings_manager.load_settings()
+        crawl_folders = settings_manager.get_effective_crawler_folders(
+            settings,
+            RAW_DATA_DIR,
+            base_dir=BASE_DIR
+        )
+        for folder in crawl_folders:
+            candidates.append(os.path.join(folder, source_name))
+    except Exception:
+        pass
 
     for candidate in candidates:
         normalized = os.path.normpath(candidate)
         if os.path.exists(normalized):
             return os.path.abspath(normalized)
+
+    matches = processed_storage.get_paths_by_name(source_name)
+    existing = [path for path in matches if os.path.exists(path)]
+    if existing:
+        existing.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+        return os.path.abspath(existing[0])
+
     return None
 
 
-def render_sources(sources):
-    """Render exactly one source link that opens the source folder."""
-    if not sources:
-        return
-
-    for source in sources:
+def resolve_source_entries(sources):
+    entries = []
+    seen = set()
+    for source in sources or []:
         source_text = str(source).strip()
         if not source_text:
             continue
 
         resolved_path = resolve_source_path(source_text)
-        label = os.path.basename(source_text) or source_text
+        label = os.path.basename(resolved_path or source_text) or source_text
+
+        file_path = None
+        if resolved_path and os.path.isfile(resolved_path):
+            file_path = resolved_path
 
         if resolved_path and os.path.isdir(resolved_path):
             folder_path = resolved_path
         elif resolved_path:
             folder_path = os.path.dirname(resolved_path)
         else:
-            # Fall back to the raw data directory so the link still opens a folder.
             folder_path = RAW_DATA_DIR
 
-        st.markdown(f"**Source:** [{label}]({Path(folder_path).resolve().as_uri()})")
+        dedupe_key = resolved_path or folder_path or source_text
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+
+        entries.append({
+            "label": label,
+            "file_path": file_path,
+            "folder_path": folder_path
+        })
+    return entries
+
+
+def render_sources(sources, context_key=""):
+    """Render source folder links and native open actions."""
+    entries = resolve_source_entries(sources)
+    if not entries:
         return
+
+    st.caption("Sources")
+    for idx, entry in enumerate(entries):
+        folder_path = entry["folder_path"]
+        folder_uri = Path(folder_path).resolve().as_uri()
+        st.markdown(f"Folder: [{folder_path}]({folder_uri})")
+
+        cols = st.columns([0.45, 0.25, 0.3], gap="small")
+        cols[0].markdown(f"File: `{entry['label']}`")
+
+        file_key = f"open_file_{context_key}_{idx}"
+        folder_key = f"open_folder_{context_key}_{idx}"
+        cols[1].button(
+            "Open file",
+            key=file_key,
+            on_click=open_native_file,
+            args=(entry["file_path"],),
+            disabled=not entry["file_path"]
+        )
+        cols[2].button(
+            "Open folder",
+            key=folder_key,
+            on_click=open_in_explorer,
+            args=(entry["file_path"] or entry["folder_path"],)
+        )
 
 # --- PAGES ---
 
@@ -368,11 +480,11 @@ def render_chat_page():
             st.button("Delete this chat", help="Admins only", disabled=True)
 
     # Display Messages
-    for message in st.session_state.messages:
+    for idx, message in enumerate(st.session_state.messages):
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
             if message["sources"]:
-                render_sources(message["sources"])
+                render_sources(message["sources"], context_key=f"{message['role']}_{idx}")
 
     # User Input
     if prompt := st.chat_input("Ask a question..."):
@@ -398,7 +510,7 @@ def render_chat_page():
 
             st.markdown(answer)
             if sources:
-                render_sources(sources)
+                render_sources(sources, context_key=f"live_{len(st.session_state.messages)}")
 
             # Save Assistant Response
             st.session_state.messages.append({"role": "assistant", "content": answer, "sources": sources})
@@ -581,7 +693,49 @@ def render_admin_chats():
 def render_admin_knowledge_base():
     st.title("Admin Knowledge Base")
 
+    settings = settings_manager.load_settings()
+    configured_folders = settings_manager.get_configured_crawler_folders(settings, base_dir=BASE_DIR)
+    effective_folders = settings_manager.get_effective_crawler_folders(settings, RAW_DATA_DIR, base_dir=BASE_DIR)
+
+    st.subheader("Crawler Folders")
+    st.caption("Leave empty to use the default data/raw folder.")
+    folders_text = st.text_area(
+        "Folders (one per line)",
+        value="\n".join(configured_folders),
+        height=120
+    )
+    if st.button("Save folders", use_container_width=True):
+        lines = [line.strip() for line in folders_text.splitlines() if line.strip()]
+        normalized = settings_manager.clean_crawler_folders(lines, base_dir=BASE_DIR)
+        missing = [path for path in normalized if not os.path.exists(path)]
+        if missing:
+            st.error("These folders do not exist:\n" + "\n".join(missing))
+        else:
+            settings_manager.update_settings({"crawler": {"folders": normalized}})
+            st.success("Crawler folders updated.")
+            settings = settings_manager.load_settings()
+            configured_folders = settings_manager.get_configured_crawler_folders(settings, base_dir=BASE_DIR)
+            effective_folders = settings_manager.get_effective_crawler_folders(settings, RAW_DATA_DIR, base_dir=BASE_DIR)
+
+    if not configured_folders:
+        st.info(f"No folders configured. Using default: {RAW_DATA_DIR}")
+
+    if effective_folders:
+        st.caption("Active crawler folders:")
+        for idx, folder in enumerate(effective_folders):
+            cols = st.columns([0.75, 0.25], gap="small")
+            cols[0].markdown(f"`{folder}`")
+            cols[1].button(
+                "Open folder",
+                key=f"open_crawler_folder_{idx}",
+                on_click=open_in_explorer,
+                args=(folder,)
+            )
+
     st.subheader("Upload and Refresh")
+    upload_targets = effective_folders or [RAW_DATA_DIR]
+    upload_target = st.selectbox("Upload destination", upload_targets, index=0)
+
     uploaded_files = st.file_uploader("Upload Documents", accept_multiple_files=True)
     if uploaded_files:
         saved_count = 0
@@ -591,32 +745,44 @@ def render_admin_knowledge_base():
             if not is_valid:
                 st.error(f"{f.name}: {detail}")
                 continue
-            with open(os.path.join(RAW_DATA_DIR, f.name), "wb") as w:
+            os.makedirs(upload_target, exist_ok=True)
+            with open(os.path.join(upload_target, f.name), "wb") as w:
                 w.write(file_bytes)
             saved_count += 1
         if saved_count:
             st.success(f"Uploaded {saved_count} file(s).")
 
     if st.button("Force Refresh", use_container_width=True):
-        import subprocess, sys
+        request_id = settings_manager.request_pipeline_refresh(st.session_state.username)
+        st.success(f"Refresh requested (id {request_id}).")
 
-        crawler = os.path.join(BASE_DIR, "src", "file_crawler.py")
-        vector_db = os.path.join(BASE_DIR, "src", "build_vector_db.py")
-        with st.status("Refreshing knowledge base...", expanded=True) as status:
-            try:
-                status.write("Running Crawler")
-                subprocess.run([sys.executable, crawler], check=True)
-                status.write("Building Vectors")
-                subprocess.run([sys.executable, vector_db], check=True)
-                status.update(label="Refresh Complete", state="complete")
-                st.success("Refreshed!")
-            except Exception as e:
-                status.update(label="Refresh Failed", state="error")
-                st.error(str(e))
+    settings = settings_manager.load_settings()
+    pipeline_state = settings.get("pipeline", {})
+    request_id = int(pipeline_state.get("refresh_request_id") or 0)
+    last_id = int(pipeline_state.get("last_refresh_id") or 0)
+    if request_id > last_id:
+        st.warning("Refresh queued. The pipeline will run shortly.")
+    last_status = pipeline_state.get("last_refresh_status")
+    last_time = pipeline_state.get("last_refresh_at")
+    if last_status:
+        st.caption(f"Last refresh: {format_timestamp(last_time)} ({last_status})")
+    last_error = pipeline_state.get("last_refresh_error")
+    if last_error and last_status == "error":
+        st.error(f"Last refresh error: {last_error}")
 
     st.subheader("Raw Files")
+    folder_for_listing = st.selectbox("Folder", upload_targets, index=0, key="raw_files_folder")
+    listing_cols = st.columns([0.75, 0.25], gap="small")
+    listing_cols[0].markdown(f"`{folder_for_listing}`")
+    listing_cols[1].button(
+        "Open folder",
+        key="open_raw_folder",
+        on_click=open_in_explorer,
+        args=(folder_for_listing,)
+    )
     try:
-        raw_files = sorted([f for f in os.listdir(RAW_DATA_DIR) if os.path.isfile(os.path.join(RAW_DATA_DIR, f))])
+        raw_files = sorted([f for f in os.listdir(folder_for_listing)
+                            if os.path.isfile(os.path.join(folder_for_listing, f))])
     except Exception as exc:
         st.error(str(exc))
         raw_files = []
@@ -635,7 +801,7 @@ def render_admin_knowledge_base():
             else:
                 deleted = 0
                 for filename in selected:
-                    path = os.path.join(RAW_DATA_DIR, filename)
+                    path = os.path.join(folder_for_listing, filename)
                     try:
                         os.remove(path)
                         deleted += 1

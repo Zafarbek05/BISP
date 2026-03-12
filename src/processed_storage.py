@@ -205,6 +205,18 @@ def get_chunk_count():
     return count
 
 
+def get_paths_by_name(name):
+    if not name:
+        return []
+    init_db()
+    conn = _connect()
+    c = conn.cursor()
+    c.execute("SELECT path FROM files WHERE name = ?", (name,))
+    rows = c.fetchall()
+    conn.close()
+    return [row[0] for row in rows]
+
+
 def save_crawl_state(changed):
     init_db()
     conn = _connect()
