@@ -6,6 +6,10 @@ import sys
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 try:
+    from . import env_loader  # noqa: F401
+except ImportError:
+    import env_loader  # noqa: F401
+try:
     from . import processed_storage as storage
 except ImportError:
     import processed_storage as storage

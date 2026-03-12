@@ -1,18 +1,25 @@
 import json
 import os
-import sqlite3
 
 import bcrypt
+
+try:
+    from . import env_loader  # noqa: F401
+    from . import db_cipher
+except ImportError:
+    import env_loader  # noqa: F401
+    import db_cipher
 
 # Define DB Path relative to this script
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "data", "chat_history.db")
 
 
+IntegrityError = db_cipher.IntegrityError
+
+
 def _get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+    return db_cipher.connect(DB_PATH)
 
 
 def _normalize_username(username: str) -> str:
@@ -271,6 +278,110 @@ def delete_session(session_id, user_id):
     c.execute("DELETE FROM sessions WHERE id = ? AND user_id = ?", (session_id, user_id))
     conn.commit()
     conn.close()
+
+
+def list_users():
+    conn = _get_conn()
+    c = conn.cursor()
+    c.execute("SELECT id, username, role, created_at FROM users ORDER BY id ASC")
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+def update_user_role(user_id, role):
+    role = role.strip().lower()
+    if role not in {"admin", "user"}:
+        raise ValueError("Invalid role.")
+    conn = _get_conn()
+    c = conn.cursor()
+    c.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
+    conn.commit()
+    conn.close()
+
+
+def reset_user_password(user_id, password):
+    if not password:
+        raise ValueError("Password is required.")
+    password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    conn = _get_conn()
+    c = conn.cursor()
+    c.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, user_id))
+    conn.commit()
+    conn.close()
+
+
+def delete_user(user_id):
+    conn = _get_conn()
+    c = conn.cursor()
+    c.execute("""DELETE FROM messages
+                 WHERE session_id IN (SELECT id FROM sessions WHERE user_id = ?)""", (user_id,))
+    c.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+    c.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def list_sessions_admin(user_id=None):
+    conn = _get_conn()
+    c = conn.cursor()
+    if user_id is None:
+        c.execute("""SELECT s.id, s.title, s.timestamp, s.user_id, u.username,
+                            (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) AS message_count
+                     FROM sessions s
+                     JOIN users u ON s.user_id = u.id
+                     ORDER BY s.id DESC""")
+    else:
+        c.execute("""SELECT s.id, s.title, s.timestamp, s.user_id, u.username,
+                            (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) AS message_count
+                     FROM sessions s
+                     JOIN users u ON s.user_id = u.id
+                     WHERE s.user_id = ?
+                     ORDER BY s.id DESC""", (user_id,))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+def delete_session_admin(session_id):
+    conn = _get_conn()
+    c = conn.cursor()
+    c.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+    c.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_usage_by_user():
+    conn = _get_conn()
+    c = conn.cursor()
+    c.execute("""SELECT u.id, u.username, u.role,
+                        COUNT(DISTINCT s.id) AS sessions,
+                        COUNT(m.id) AS messages,
+                        MAX(s.timestamp) AS last_session
+                 FROM users u
+                 LEFT JOIN sessions s ON s.user_id = u.id
+                 LEFT JOIN messages m ON m.session_id = s.id
+                 GROUP BY u.id
+                 ORDER BY u.id ASC""")
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+def get_system_counts():
+    conn = _get_conn()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM users")
+    users = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'")
+    admins = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM sessions")
+    sessions = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM messages")
+    messages = c.fetchone()[0]
+    conn.close()
+    return {"users": users, "admins": admins, "sessions": sessions, "messages": messages}
 
 
 # Initialize DB on first run

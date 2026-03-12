@@ -3,6 +3,10 @@ import hashlib
 import numpy as np
 from sentence_transformers import SentenceTransformer
 try:
+    from . import env_loader  # noqa: F401
+except ImportError:
+    import env_loader  # noqa: F401
+try:
     from . import processed_storage as storage
 except ImportError:
     import processed_storage as storage

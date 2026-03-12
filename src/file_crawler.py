@@ -3,6 +3,10 @@ import hashlib
 from docx import Document
 from pypdf import PdfReader
 try:
+    from . import env_loader  # noqa: F401
+except ImportError:
+    import env_loader  # noqa: F401
+try:
     from . import processed_storage as storage
 except ImportError:
     import processed_storage as storage

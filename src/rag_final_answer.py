@@ -1,7 +1,10 @@
 import os
 import argparse
 import numpy as np
-from dotenv import load_dotenv
+try:
+    from . import env_loader  # noqa: F401
+except ImportError:
+    import env_loader  # noqa: F401
 try:
     from . import processed_storage as storage
 except ImportError:
@@ -11,10 +14,6 @@ except ImportError:
 # Gets the 'src' folder, then goes up to the Project Root
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROCESSED_DATA_DIR = os.path.join(BASE_DIR, "data", "processed")
-ENV_PATH = os.path.join(BASE_DIR, ".env")
-
-# Load environment variables from the root .env
-load_dotenv(ENV_PATH)
 api_key = os.getenv("GEMINI_API_KEY")
 
 # --- INITIALIZATION ---

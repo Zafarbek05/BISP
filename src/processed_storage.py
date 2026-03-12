@@ -1,5 +1,11 @@
 import os
-import sqlite3
+
+try:
+    from . import env_loader  # noqa: F401
+    from . import db_cipher
+except ImportError:
+    import env_loader  # noqa: F401
+    import db_cipher
 
 # --- ANCHOR PATHING ---
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -13,7 +19,7 @@ def get_db_path():
 
 def _connect():
     os.makedirs(PROCESSED_DATA_DIR, exist_ok=True)
-    return sqlite3.connect(DB_PATH)
+    return db_cipher.connect(DB_PATH)
 
 
 def init_db():
