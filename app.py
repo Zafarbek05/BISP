@@ -6,7 +6,7 @@ import streamlit as st
 import src.chat_storage as db
 import src.env_loader
 import src.processed_storage as processed_storage
-from src.rag_final_answer import ask_gemini
+import src.rag_final_answer as rag_final_answer
 
 # --- CONFIG & PATHS ---
 st.set_page_config(page_title="Semantic Search Assistant", page_icon="🎓", layout="wide")
@@ -99,8 +99,33 @@ def render_rate_limit(container):
         st.subheader("Rate Limit")
         st.progress(min(1.0, used / RATE_LIMIT_MAX))
         st.caption(f"{used}/{RATE_LIMIT_MAX} requests in the last {RATE_LIMIT_WINDOW} seconds")
-        if remaining == 0:
-            st.caption(f"Retry in {int(retry_after)}s")
+    if remaining == 0:
+        st.caption(f"Retry in {int(retry_after)}s")
+
+# --- RAG STATUS HELPERS ---
+def run_rag_with_status(prompt):
+    with st.status("Working...", expanded=True) as status:
+        try:
+            if rag_final_answer.model_embed is None:
+                status.write("Loading Embedding Model")
+            else:
+                status.write("Embedding Model Ready")
+            rag_final_answer.get_embedder()
+
+            if (rag_final_answer.data_cache.get("chunks") is None
+                    or rag_final_answer.data_cache.get("vectors") is None):
+                status.write("Loading Vectors")
+            else:
+                status.write("Vectors Ready")
+            rag_final_answer.load_processed_data()
+
+            status.write("Generating Answer")
+            answer, sources = rag_final_answer.ask_gemini(prompt)
+            status.update(label="Answer Ready", state="complete")
+            return answer, sources
+        except Exception:
+            status.update(label="Answer Failed", state="error")
+            raise
 
 # --- AUTH ---
 if "authenticated" not in st.session_state:
@@ -365,16 +390,20 @@ def render_chat_page():
 
         # 2. Generate AI Answer
         with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                answer, sources = ask_gemini(prompt)
-                st.markdown(answer)
-                if sources:
-                    render_sources(sources)
+            try:
+                answer, sources = run_rag_with_status(prompt)
+            except Exception as exc:
+                st.error(str(exc))
+                return
 
-                # Save Assistant Response
-                st.session_state.messages.append({"role": "assistant", "content": answer, "sources": sources})
-                db.save_message(st.session_state.session_id, "assistant", answer, sources,
-                                user_id=st.session_state.user_id)
+            st.markdown(answer)
+            if sources:
+                render_sources(sources)
+
+            # Save Assistant Response
+            st.session_state.messages.append({"role": "assistant", "content": answer, "sources": sources})
+            db.save_message(st.session_state.session_id, "assistant", answer, sources,
+                            user_id=st.session_state.user_id)
 
         # 3. AUTO-TITLE LOGIC (Run this LAST)
         # If this was the first interaction (User + AI = 2 messages), update the title
@@ -573,12 +602,17 @@ def render_admin_knowledge_base():
 
         crawler = os.path.join(BASE_DIR, "src", "file_crawler.py")
         vector_db = os.path.join(BASE_DIR, "src", "build_vector_db.py")
-        try:
-            subprocess.run([sys.executable, crawler], check=True)
-            subprocess.run([sys.executable, vector_db], check=True)
-            st.success("Refreshed!")
-        except Exception as e:
-            st.error(str(e))
+        with st.status("Refreshing knowledge base...", expanded=True) as status:
+            try:
+                status.write("Running Crawler")
+                subprocess.run([sys.executable, crawler], check=True)
+                status.write("Building Vectors")
+                subprocess.run([sys.executable, vector_db], check=True)
+                status.update(label="Refresh Complete", state="complete")
+                st.success("Refreshed!")
+            except Exception as e:
+                status.update(label="Refresh Failed", state="error")
+                st.error(str(e))
 
     st.subheader("Raw Files")
     try:
