@@ -9,6 +9,12 @@ SETTINGS_PATH = os.path.join(BASE_DIR, "settings.json")
 
 DEFAULT_SETTINGS = {
     "version": 1,
+    "rag": {
+        "engine": "cloud",
+        "cloud_model": "gemini-2.5-flash",
+        "local_model": "gemma2:2b",
+        "ollama_url": "http://localhost:11434"
+    },
     "crawler": {
         "folders": []
     },

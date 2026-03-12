@@ -1,5 +1,8 @@
 import os
 import argparse
+import json
+import urllib.request
+import urllib.error
 import numpy as np
 try:
     from . import env_loader  # noqa: F401
@@ -9,6 +12,10 @@ try:
     from . import processed_storage as storage
 except ImportError:
     import processed_storage as storage
+try:
+    from . import settings_manager as settings_manager
+except ImportError:
+    import settings_manager as settings_manager
 
 # --- SMART PATHING ---
 # Gets the 'src' folder, then goes up to the Project Root
@@ -17,7 +24,9 @@ PROCESSED_DATA_DIR = os.path.join(BASE_DIR, "data", "processed")
 api_key = os.getenv("GEMINI_API_KEY")
 
 # --- INITIALIZATION ---
-CURRENT_MODEL = "gemini-2.5-flash"
+DEFAULT_CLOUD_MODEL = "gemini-2.5-flash"
+DEFAULT_LOCAL_MODEL = "gemma2:2b"
+DEFAULT_OLLAMA_URL = "http://localhost:11434"
 
 # 1. Setup Embedding Model
 model_embed = None
@@ -35,6 +44,23 @@ data_cache = {
     "db_size": None,
     "vectors_size": None,
 }
+
+
+def get_rag_settings():
+    try:
+        settings = settings_manager.load_settings()
+    except Exception:
+        settings = {}
+
+    rag_settings = settings.get("rag", {}) if isinstance(settings, dict) else {}
+    engine = (rag_settings.get("engine") or "cloud").strip().lower()
+    if engine not in {"cloud", "local"}:
+        engine = "cloud"
+
+    cloud_model = rag_settings.get("cloud_model") or DEFAULT_CLOUD_MODEL
+    local_model = rag_settings.get("local_model") or DEFAULT_LOCAL_MODEL
+    ollama_url = rag_settings.get("ollama_url") or DEFAULT_OLLAMA_URL
+    return engine, cloud_model, local_model, ollama_url
 
 
 def get_embedder():
@@ -117,11 +143,8 @@ def get_relevant_context(query, top_k=5):
     return context_text, list(dict.fromkeys(sources))
 
 
-def ask_gemini(query):
-    """Retrieves context and generates an answer using Gemini."""
+def build_rag_prompt(query):
     context, source_list = get_relevant_context(query)
-
-    # System instruction to keep the AI grounded (prevent hallucinations)
     system_instr = (
         "You are a professional academic assistant at WIUT. "
         "Answer the question using ONLY the provided context. "
@@ -136,22 +159,64 @@ def ask_gemini(query):
     USER QUESTION: 
     {query}
     """
+    return prompt, system_instr, source_list
 
-    # Generate response using the 2026 google-genai SDK
+
+def generate_with_gemini(prompt, system_instr, model_name):
     client = get_genai_client()
     # Lazy import here to avoid overhead at module import time.
     from google.genai import types
 
     response = client.models.generate_content(
-        model=CURRENT_MODEL,
+        model=model_name,
         contents=prompt,
         config=types.GenerateContentConfig(
             system_instruction=system_instr,
-            temperature=0.1  # Low temperature for more factual, less creative answers
+            temperature=0.1
         )
     )
+    return response.text
 
-    return response.text, source_list
+
+def generate_with_ollama(prompt, system_instr, model_name, ollama_url):
+    payload = {
+        "model": model_name,
+        "prompt": prompt,
+        "system": system_instr,
+        "stream": False
+    }
+    url = f"{ollama_url.rstrip('/')}/api/generate"
+    data = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            body = response.read().decode("utf-8")
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Ollama request failed: {exc}") from exc
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Invalid Ollama response: {body}") from exc
+    return (payload.get("response") or "").strip()
+
+
+def ask_rag(query):
+    """Retrieves context and generates an answer using the configured engine."""
+    prompt, system_instr, source_list = build_rag_prompt(query)
+    engine, cloud_model, local_model, ollama_url = get_rag_settings()
+    if engine == "local":
+        answer = generate_with_ollama(prompt, system_instr, local_model, ollama_url)
+    else:
+        answer = generate_with_gemini(prompt, system_instr, cloud_model)
+    return answer, source_list
+
+
+def ask_gemini(query):
+    """Legacy helper to force Gemini (cloud) responses."""
+    prompt, system_instr, source_list = build_rag_prompt(query)
+    _, cloud_model, _, _ = get_rag_settings()
+    answer = generate_with_gemini(prompt, system_instr, cloud_model)
+    return answer, source_list
 
 
 # --- TEST LOOP ---
@@ -165,10 +230,16 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.no_interactive:
-        print(f"RAG initialized (Powered by {CURRENT_MODEL}).")
+        engine, cloud_model, local_model, _ = get_rag_settings()
+        model_label = local_model if engine == "local" else cloud_model
+        engine_label = "Local (Ollama)" if engine == "local" else "Cloud (Gemini)"
+        print(f"RAG initialized ({engine_label}, model: {model_label}).")
         raise SystemExit(0)
 
-    print(f"\n--- RAG System Online (Powered by {CURRENT_MODEL}) ---")
+    engine, cloud_model, local_model, _ = get_rag_settings()
+    model_label = local_model if engine == "local" else cloud_model
+    engine_label = "Local (Ollama)" if engine == "local" else "Cloud (Gemini)"
+    print(f"\n--- RAG System Online ({engine_label}, model: {model_label}) ---")
     print("Type your question and press Enter. Type 'q' to quit.")
 
     while True:
@@ -178,7 +249,7 @@ if __name__ == "__main__":
             break
 
         try:
-            answer, sources = ask_gemini(user_input)
+            answer, sources = ask_rag(user_input)
             print("\n" + "=" * 60)
             print("AI RESPONSE:")
             print(answer)

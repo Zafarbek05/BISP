@@ -3,6 +3,7 @@ import time
 import mimetypes
 import subprocess
 import sys
+import importlib
 from pathlib import Path
 import streamlit as st
 import src.chat_storage as db
@@ -123,12 +124,37 @@ def run_rag_with_status(prompt):
             rag_final_answer.load_processed_data()
 
             status.write("Generating Answer")
-            answer, sources = rag_final_answer.ask_gemini(prompt)
+            answer, sources = get_rag_answer(prompt)
             status.update(label="Answer Ready", state="complete")
             return answer, sources
         except Exception:
             status.update(label="Answer Failed", state="error")
             raise
+
+
+def get_rag_answer(prompt):
+    ask_fn = getattr(rag_final_answer, "ask_rag", None)
+    if ask_fn is None:
+        try:
+            importlib.reload(rag_final_answer)
+        except Exception:
+            pass
+        ask_fn = getattr(rag_final_answer, "ask_rag", None)
+
+    if ask_fn is not None:
+        return ask_fn(prompt)
+
+    settings = settings_manager.load_settings()
+    engine = (settings.get("rag", {}) or {}).get("engine", "cloud")
+    if engine == "cloud" and hasattr(rag_final_answer, "ask_gemini"):
+        return rag_final_answer.ask_gemini(prompt)
+
+    module_path = getattr(rag_final_answer, "__file__", "unknown")
+    raise AttributeError(
+        "rag_final_answer.ask_rag is missing. "
+        f"Loaded module: {module_path}. "
+        "Restart the app to reload updated code."
+    )
 
 # --- AUTH ---
 if "authenticated" not in st.session_state:
@@ -694,6 +720,25 @@ def render_admin_knowledge_base():
     st.title("Admin Knowledge Base")
 
     settings = settings_manager.load_settings()
+    rag_settings = settings.get("rag", {})
+    engine_options = ["Cloud (Gemini)", "Local (Ollama)"]
+    engine_map = {
+        "Cloud (Gemini)": "cloud",
+        "Local (Ollama)": "local",
+    }
+    current_engine = (rag_settings.get("engine") or "cloud").lower()
+    engine_index = 1 if current_engine == "local" else 0
+
+    st.subheader("Reasoning Engine")
+    selected_engine = st.selectbox("Engine", engine_options, index=engine_index, key="rag_engine_select")
+    st.caption(f"Cloud model: {rag_settings.get('cloud_model', 'gemini-2.5-flash')}")
+    st.caption(f"Local model: {rag_settings.get('local_model', 'gemma2:2b')}")
+    if st.button("Save engine", use_container_width=True, key="save_rag_engine"):
+        settings_manager.update_settings({"rag": {"engine": engine_map[selected_engine]}})
+        st.success("Reasoning engine updated.")
+        settings = settings_manager.load_settings()
+        rag_settings = settings.get("rag", {})
+
     configured_folders = settings_manager.get_configured_crawler_folders(settings, base_dir=BASE_DIR)
     effective_folders = settings_manager.get_effective_crawler_folders(settings, RAW_DATA_DIR, base_dir=BASE_DIR)
 

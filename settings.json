@@ -1,7 +1,16 @@
 {
   "version": 1,
+  "rag": {
+    "engine": "local",
+    "cloud_model": "gemini-2.5-flash",
+    "local_model": "gemma2:2b",
+    "ollama_url": "http://localhost:11434"
+  },
   "crawler": {
-    "folders": []
+    "folders": [
+      "C:\\Users\\Zafarbek\\Desktop\\masters prep\\sparck ai scholarship",
+      "C:\\Users\\Zafarbek\\Desktop\\BISP\\final project\\data\\raw"
+    ]
   },
   "pipeline": {
     "refresh_request_id": 0,
