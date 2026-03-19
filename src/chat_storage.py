@@ -4,10 +4,8 @@ import os
 import bcrypt
 
 try:
-    from . import env_loader  # noqa: F401
     from . import db_cipher
 except ImportError:
-    import env_loader  # noqa: F401
     import db_cipher
 
 # Define DB Path relative to this script

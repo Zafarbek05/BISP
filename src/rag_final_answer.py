@@ -4,10 +4,9 @@ import json
 import urllib.request
 import urllib.error
 import numpy as np
-try:
-    from . import env_loader  # noqa: F401
-except ImportError:
-    import env_loader  # noqa: F401
+from dotenv import load_dotenv, find_dotenv
+
+load_dotenv(find_dotenv(), override=False)
 try:
     from . import processed_storage as storage
 except ImportError:

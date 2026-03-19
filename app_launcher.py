@@ -1,4 +1,6 @@
+import argparse
 import os
+import secrets
 import subprocess
 import sys
 import time
@@ -59,6 +61,17 @@ def _terminate_process(proc: subprocess.Popen | None, name: str) -> None:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Launch the app and pipeline.")
+    parser.add_argument(
+        "--generate-token",
+        action="store_true",
+        help="Print a random token and exit.",
+    )
+    args = parser.parse_args()
+    if args.generate_token:
+        print(secrets.token_urlsafe(48))
+        return 0
+
     root_dir = os.path.dirname(os.path.abspath(__file__))
     pipeline_script = os.path.join(root_dir, "src", "pipeline.py")
     app_script = os.path.join(root_dir, "app.py")

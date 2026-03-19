@@ -1,10 +1,8 @@
 import os
 
 try:
-    from . import env_loader  # noqa: F401
     from . import db_cipher
 except ImportError:
-    import env_loader  # noqa: F401
     import db_cipher
 
 # --- ANCHOR PATHING ---

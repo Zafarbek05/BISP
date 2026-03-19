@@ -7,7 +7,6 @@ import importlib
 from pathlib import Path
 import streamlit as st
 import src.chat_storage as db
-import src.env_loader
 import src.processed_storage as processed_storage
 import src.rag_final_answer as rag_final_answer
 import src.settings_manager as settings_manager

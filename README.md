@@ -1,4 +1,4 @@
-The project scans data/raw, chunks supported documents, and stores processed metadata and chunks in a SQLite database at data/processed/processed_data.db. The build_vector_db.py script vectorizes the chunks and saves embeddings in data/processed/vector_storage.npy. The "all-MiniLM-L6-v2" model is used to vectorize text.
+The pipeline scans data/raw, chunks supported documents, and stores processed metadata and chunks in a SQLite database at data/processed/processed_data.db. It also vectorizes the chunks and saves embeddings in data/processed/vector_storage.npy using the "all-MiniLM-L6-v2" model.
 
 Next steps:
 1) Wrap up in a Docker container

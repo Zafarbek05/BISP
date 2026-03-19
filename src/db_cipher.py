@@ -1,6 +1,10 @@
 import os
 import warnings
 
+from dotenv import load_dotenv, find_dotenv
+
+load_dotenv(find_dotenv(), override=False)
+
 try:
     from sqlcipher3 import dbapi2 as sqlcipher
     _HAS_SQLCIPHER = True
@@ -10,11 +14,6 @@ except Exception as exc:
     _SQLCIPHER_IMPORT_ERROR = exc
 
 _WARNED_FALLBACK = False
-
-try:
-    from . import env_loader
-except ImportError:
-    import env_loader
 
 
 def _get_db_key():
