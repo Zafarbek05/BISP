@@ -11,6 +11,7 @@ import src.env_loader
 import src.processed_storage as processed_storage
 import src.rag_final_answer as rag_final_answer
 import src.settings_manager as settings_manager
+import src.ollama_manager as ollama_manager
 
 # --- CONFIG & PATHS ---
 st.set_page_config(page_title="Semantic Search Assistant", page_icon="🎓", layout="wide")
@@ -734,10 +735,26 @@ def render_admin_knowledge_base():
     st.caption(f"Cloud model: {rag_settings.get('cloud_model', 'gemini-2.5-flash')}")
     st.caption(f"Local model: {rag_settings.get('local_model', 'gemma2:2b')}")
     if st.button("Save engine", use_container_width=True, key="save_rag_engine"):
-        settings_manager.update_settings({"rag": {"engine": engine_map[selected_engine]}})
-        st.success("Reasoning engine updated.")
-        settings = settings_manager.load_settings()
-        rag_settings = settings.get("rag", {})
+        selected_key = engine_map[selected_engine]
+        action_label = "Loading Ollama" if selected_key == "local" else "Stopping Ollama"
+        ok, message = False, ""
+        with st.status(action_label, expanded=False) as status:
+            settings_manager.update_settings({"rag": {"engine": selected_key}})
+            settings = settings_manager.load_settings()
+            rag_settings = settings.get("rag", {})
+            ollama_url = rag_settings.get("ollama_url") or rag_final_answer.DEFAULT_OLLAMA_URL
+            if selected_key == "local":
+                ok, message = ollama_manager.ensure_ollama_running(ollama_url)
+            else:
+                ok, message = ollama_manager.stop_ollama_server(ollama_url)
+            if ok:
+                status.update(label="Engine Updated", state="complete")
+            else:
+                status.update(label="Engine Update Failed", state="error")
+        if ok:
+            st.success(message)
+        else:
+            st.error(message)
 
     configured_folders = settings_manager.get_configured_crawler_folders(settings, base_dir=BASE_DIR)
     effective_folders = settings_manager.get_effective_crawler_folders(settings, RAW_DATA_DIR, base_dir=BASE_DIR)
