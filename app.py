@@ -4,6 +4,7 @@ import mimetypes
 import subprocess
 import sys
 import importlib
+from string import Template
 from pathlib import Path
 import streamlit as st
 import src.chat_storage as db
@@ -30,49 +31,369 @@ ADMIN_PAGES = (
 if not os.path.exists(RAW_DATA_DIR):
     os.makedirs(RAW_DATA_DIR)
 
-# --- CSS FIX ---
-st.markdown("""
+# --- UI THEME ---
+theme_base = (st.get_option("theme.base") or "light").lower()
+is_light_theme = theme_base == "light"
+
+theme_tokens = {
+    "bg_start": "#f5f8ff" if is_light_theme else "#040b16",
+    "bg_mid": "#eef4ff" if is_light_theme else "#07111f",
+    "bg_end": "#e8eefb" if is_light_theme else "#0b1627",
+    "header_bg": "rgba(255, 255, 255, 0.78)" if is_light_theme else "rgba(4, 11, 22, 0.62)",
+    "grid_line": "rgba(26, 44, 74, 0.05)" if is_light_theme else "rgba(255, 255, 255, 0.025)",
+    "panel": "rgba(255, 255, 255, 0.72)" if is_light_theme else "rgba(12, 24, 40, 0.76)",
+    "panel_border": "rgba(79, 140, 255, 0.14)" if is_light_theme else "rgba(122, 162, 255, 0.16)",
+    "text": "#10213a" if is_light_theme else "#e8f0ff",
+    "muted": "#5d7192" if is_light_theme else "#8ea3c4",
+    "accent": "#1478ff" if is_light_theme else "#6ee7ff",
+    "accent_2": "#3a68ff" if is_light_theme else "#4f8cff",
+    "success": "#16a34a" if is_light_theme else "#4ade80",
+    "warning": "#d97706",
+    "danger": "#dc2626" if is_light_theme else "#fb7185",
+    "shadow": "0 20px 50px rgba(39, 71, 125, 0.12)" if is_light_theme else "0 24px 60px rgba(1, 8, 20, 0.45)",
+    "sidebar_bg": "linear-gradient(180deg, rgba(248, 251, 255, 0.96), rgba(237, 243, 255, 0.94))"
+                  if is_light_theme else
+                  "linear-gradient(180deg, rgba(5, 13, 24, 0.95), rgba(7, 17, 31, 0.94))",
+    "chat_bg": "rgba(255, 255, 255, 0.72)" if is_light_theme else "rgba(9, 21, 36, 0.68)",
+    "chat_user_bg": "rgba(229, 238, 255, 0.95)" if is_light_theme else "rgba(21, 40, 67, 0.84)",
+    "input_bg": "rgba(255, 255, 255, 0.92)" if is_light_theme else "rgba(8, 19, 32, 0.9)",
+}
+
+theme_css = Template("""
     <style>
-    /* Main Background */
-    .main { background-color: #f5f7f9; }
+    :root {
+        --panel: $panel;
+        --panel-border: $panel_border;
+        --text: $text;
+        --muted: $muted;
+        --accent: $accent;
+        --accent-2: $accent_2;
+        --success: $success;
+        --warning: $warning;
+        --danger: $danger;
+        --shadow: $shadow;
+    }
 
-    /* Chat Bubbles */
-    .stChatMessage { border-radius: 15px; }
+    html, body, [data-testid="stAppViewContainer"], .stApp {
+        background:
+            radial-gradient(circle at top left, rgba(79, 140, 255, 0.18), transparent 32%),
+            radial-gradient(circle at top right, rgba(110, 231, 255, 0.10), transparent 28%),
+            linear-gradient(180deg, $bg_start 0%, $bg_mid 45%, $bg_end 100%);
+        color: var(--text);
+    }
 
-    /* SIDEBAR BUTTONS - THE FIX */
-    /* 1. Force the container div to stretch to 100% */
+    [data-testid="stHeader"] {
+        background: $header_bg;
+        backdrop-filter: blur(12px);
+        border-bottom: 1px solid $panel_border;
+    }
+
+    [data-testid="stAppViewContainer"] > .main {
+        background-image:
+            linear-gradient($grid_line 1px, transparent 1px),
+            linear-gradient(90deg, $grid_line 1px, transparent 1px);
+        background-size: 36px 36px;
+    }
+
+    [data-testid="block-container"] {
+        padding-top: 2.6rem;
+        padding-bottom: 2.8rem;
+    }
+
+    .page-shell {
+        position: relative;
+    }
+
+    .page-hero {
+        padding: 1.8rem 1.9rem;
+        margin-bottom: 1.45rem;
+        border-radius: 22px;
+        border: 1px solid var(--panel-border);
+        background:
+            linear-gradient(135deg, rgba(79, 140, 255, 0.18), var(--panel) 42%, rgba(110, 231, 255, 0.08));
+        box-shadow: var(--shadow);
+    }
+
+    .page-kicker {
+        font-size: 0.72rem;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--accent);
+        font-weight: 700;
+        margin-bottom: 0.55rem;
+    }
+
+    .page-title {
+        font-size: clamp(1.9rem, 3vw, 2.8rem);
+        line-height: 1.05;
+        margin: 0;
+        font-weight: 800;
+        color: var(--text);
+    }
+
+    .page-subtitle {
+        margin-top: 0.45rem;
+        max-width: 58rem;
+        color: var(--muted);
+        font-size: 0.98rem;
+    }
+
+    .panel {
+        padding: 1.45rem 1.5rem;
+        margin-bottom: 1.35rem;
+        border-radius: 20px;
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(18px);
+    }
+
+    .panel.tight {
+        padding-top: 1.15rem;
+    }
+
+    .section-label {
+        margin-bottom: 1rem;
+        color: var(--text);
+        font-size: 1rem;
+        font-weight: 700;
+        letter-spacing: 0.01em;
+    }
+
+    .metric-card {
+        padding: 1.15rem 1.2rem;
+        border-radius: 18px;
+        background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 86%, white 14%), var(--panel));
+        border: 1px solid var(--panel-border);
+        box-shadow: var(--shadow);
+    }
+
+    .metric-label {
+        color: var(--muted);
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        margin-bottom: 0.4rem;
+    }
+
+    .metric-value {
+        color: var(--text);
+        font-size: 1.75rem;
+        line-height: 1;
+        font-weight: 800;
+    }
+
+    .metric-note {
+        margin-top: 0.45rem;
+        color: var(--accent);
+        font-size: 0.82rem;
+    }
+
+    .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        padding: 0.42rem 0.78rem;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        color: var(--text);
+        font-size: 0.85rem;
+        font-weight: 600;
+    }
+
+    .status-pill::before {
+        content: "";
+        width: 0.6rem;
+        height: 0.6rem;
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 14px currentColor;
+    }
+
+    .status-pill.online::before { background: var(--success); }
+    .status-pill.offline::before { background: var(--danger); }
+
+    .source-card {
+        padding: 1rem 1.05rem;
+        margin: 0.55rem 0 0.95rem;
+        border-radius: 16px;
+        border: 1px solid var(--panel-border);
+        background: color-mix(in srgb, var(--panel) 92%, transparent);
+    }
+
+    .source-title {
+        color: var(--muted);
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        margin-bottom: 0.25rem;
+    }
+
+    .source-file {
+        color: var(--text);
+        font-weight: 600;
+    }
+
+    .login-shell {
+        max-width: 540px;
+        margin: 3rem auto 0;
+    }
+
+    .login-shell h1 {
+        margin-bottom: 0.35rem;
+    }
+
+    [data-testid="stSidebar"] {
+        background:
+            $sidebar_bg,
+            radial-gradient(circle at top, rgba(79, 140, 255, 0.16), transparent 30%);
+        border-right: 1px solid var(--panel-border);
+    }
+
+    [data-testid="stSidebar"] [data-testid="stSidebarContent"] {
+        padding-top: 1rem;
+    }
+
     [data-testid="stSidebar"] div.stButton {
         width: 100%;
-        padding-bottom: 5px; /* Add breathing room between buttons */
+        padding-bottom: 0.42rem;
     }
 
-    /* 2. Force the actual button to fill the container */
-    [data-testid="stSidebar"] button {
+    .sidebar-brand {
+        padding: 1rem 1rem 1.1rem;
+        border-radius: 18px;
+        margin-bottom: 1rem;
+        background: linear-gradient(135deg, rgba(79, 140, 255, 0.22), color-mix(in srgb, var(--panel) 92%, transparent));
+        border: 1px solid var(--panel-border);
+    }
+
+    .sidebar-title {
+        color: var(--text);
+        font-size: 1.15rem;
+        font-weight: 800;
+        margin-bottom: 0.3rem;
+    }
+
+    .sidebar-subtitle {
+        color: var(--muted);
+        font-size: 0.86rem;
+        line-height: 1.45;
+    }
+
+    .sidebar-section {
+        margin: 1.1rem 0 0.7rem;
+        color: var(--muted);
+        font-size: 0.76rem;
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+        font-weight: 700;
+    }
+
+    [data-testid="stSidebar"] button,
+    .stButton > button,
+    .stDownloadButton > button {
         width: 100% !important;
-        border-radius: 8px;
-        text-align: left;       /* Left align text for better readability */
-        padding-left: 15px;     /* nice spacing for text */
-        white-space: nowrap;    /* Prevent wrapping */
-        overflow: hidden;       /* specific to truncating */
-        text-overflow: ellipsis;/* Add ... if too long */
-        height: 3rem;           /* Make them slightly taller */
+        min-height: 3rem;
+        border-radius: 14px;
+        border: 1px solid var(--panel-border);
+        background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 76%, rgba(79, 140, 255, 0.04)), var(--panel));
+        color: var(--text);
+        box-shadow: 0 14px 30px rgba(1, 8, 20, 0.10);
+        transition: all 0.18s ease;
     }
 
-    /* 3. Style for the currently active chat (disabled button) */
+    [data-testid="stSidebar"] button {
+        text-align: left;
+        padding-left: 0.95rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    [data-testid="stSidebar"] button:hover,
+    .stButton > button:hover,
+    .stDownloadButton > button:hover {
+        border-color: color-mix(in srgb, var(--accent) 45%, white);
+        transform: translateY(-1px);
+    }
+
     [data-testid="stSidebar"] button:disabled {
-        background-color: #e6eefc;
-        color: #1a3d7c;
-        border-color: #c6d7f5;
-        font-weight: bold;
-        opacity: 1; /* Fixes dimming issue */
+        background: linear-gradient(180deg, rgba(79, 140, 255, 0.22), color-mix(in srgb, var(--panel) 95%, transparent));
+        border-color: color-mix(in srgb, var(--accent) 24%, white);
+        color: var(--text);
+        opacity: 1;
+        font-weight: 700;
     }
 
-    /* 4. "New Chat" button special styling (optional, makes it stand out) */
-    [data-testid="stSidebar"] div.stButton > button:active {
-        border-color: #4CAF50;
+    .stChatMessage {
+        border-radius: 20px;
+        border: 1px solid var(--panel-border);
+        padding: 0.35rem 0.45rem;
+        background: $chat_bg;
+        box-shadow: 0 6px 14px rgba(1, 8, 20, 0.07);
+    }
+
+    [data-testid="stChatMessageAvatarUser"] + div .stChatMessage {
+        background: $chat_user_bg;
+    }
+
+    [data-testid="stChatInput"] {
+        background: $input_bg;
+        border: 1px solid var(--panel-border);
+        border-radius: 18px;
+        box-shadow: var(--shadow);
+    }
+
+    [data-testid="stMetric"] {
+        background: transparent;
+        border: none;
+    }
+
+    div[data-baseweb="select"] > div,
+    div[data-baseweb="input"] > div,
+    .stTextArea textarea,
+    .stTextInput input,
+    .stNumberInput input,
+    .stDateInput input {
+        background: $input_bg !important;
+        color: var(--text) !important;
+        border: 1px solid var(--panel-border) !important;
+        border-radius: 14px !important;
+    }
+
+    .stRadio > div,
+    .stCheckbox {
+        color: var(--text);
+    }
+
+    [data-testid="stDataFrame"] {
+        border-radius: 16px;
+        overflow: hidden;
+        border: 1px solid var(--panel-border);
+        background: color-mix(in srgb, var(--panel) 94%, transparent);
+    }
+
+    .stAlert {
+        border-radius: 16px;
+        border-width: 1px;
+    }
+
+    .stMarkdown, p, label, .stCaption {
+        color: var(--text);
+    }
+
+    .stCaption {
+        color: var(--muted);
+    }
+
+    hr, [data-testid="stDivider"] {
+        border-color: var(--panel-border);
     }
     </style>
-    """, unsafe_allow_html=True)
+    """).substitute(theme_tokens)
+
+st.markdown(theme_css, unsafe_allow_html=True)
 
 # --- RATE LIMITING ---
 RATE_LIMIT_MAX = 5
@@ -105,6 +426,63 @@ def render_rate_limit(container):
         st.caption(f"{used}/{RATE_LIMIT_MAX} requests in the last {RATE_LIMIT_WINDOW} seconds")
     if remaining == 0:
         st.caption(f"Retry in {int(retry_after)}s")
+
+
+def render_page_header(title, subtitle, kicker="Control Surface"):
+    st.markdown(
+        f"""
+        <div class="page-hero">
+            <div class="page-kicker">{kicker}</div>
+            <h1 class="page-title">{title}</h1>
+            <div class="page-subtitle">{subtitle}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def open_panel(label=None, tight=False):
+    panel_class = "panel tight" if tight else "panel"
+    st.markdown(f'<div class="{panel_class}">', unsafe_allow_html=True)
+    if label:
+        st.markdown(f'<div class="section-label">{label}</div>', unsafe_allow_html=True)
+
+
+def close_panel():
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_stat_card(column, label, value, note):
+    column.markdown(
+        f"""
+        <div class="metric-card">
+            <div class="metric-label">{label}</div>
+            <div class="metric-value">{value}</div>
+            <div class="metric-note">{note}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_system_pill(is_online):
+    status_class = "online" if is_online else "offline"
+    status_text = "System Online" if is_online else "System Offline"
+    st.markdown(f'<div class="status-pill {status_class}">{status_text}</div>', unsafe_allow_html=True)
+
+
+def render_sidebar_section(label):
+    st.markdown(f'<div class="sidebar-section">{label}</div>', unsafe_allow_html=True)
+
+
+def render_admin_sidebar_nav():
+    admin_pages = ensure_admin_page()
+    render_sidebar_section("Admin Panel")
+    for page in admin_pages:
+        is_current = st.session_state.page == page
+        if st.button(page, key=f"admin_nav_{page}", disabled=is_current, use_container_width=True):
+            set_page(page)
+            st.rerun()
 
 # --- RAG STATUS HELPERS ---
 def run_rag_with_status(prompt):
@@ -174,9 +552,11 @@ def logout():
 
 
 def show_login():
-    st.title("Login")
+    st.markdown('<div class="login-shell">', unsafe_allow_html=True)
+    render_page_header("Secure Access", "Sign in to the semantic search workspace.", kicker="Authentication")
 
     if db.get_user_count() == 0:
+        open_panel("Create initial admin")
         st.info("No users found. Create the first admin account.")
         with st.form("create_admin"):
             username = st.text_input("Admin username")
@@ -197,7 +577,9 @@ def show_login():
                     st.rerun()
                 except db.IntegrityError:
                     st.error("Username already exists.")
+        close_panel()
     else:
+        open_panel("Account login")
         with st.form("login_form"):
             username = st.text_input("Username")
             password = st.text_input("Password", type="password")
@@ -218,6 +600,8 @@ def show_login():
                 st.rerun()
             else:
                 st.error("Invalid username or password.")
+        close_panel()
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 if not st.session_state.authenticated:
@@ -471,10 +855,12 @@ def render_sources(sources, context_key=""):
     for idx, entry in enumerate(entries):
         folder_path = entry["folder_path"]
         folder_uri = Path(folder_path).resolve().as_uri()
+        st.markdown('<div class="source-card">', unsafe_allow_html=True)
+        st.markdown('<div class="source-title">Source Location</div>', unsafe_allow_html=True)
         st.markdown(f"Folder: [{folder_path}]({folder_uri})")
 
         cols = st.columns([0.45, 0.25, 0.3], gap="small")
-        cols[0].markdown(f"File: `{entry['label']}`")
+        cols[0].markdown(f'<div class="source-file">File: {entry["label"]}</div>', unsafe_allow_html=True)
 
         file_key = f"open_file_{context_key}_{idx}"
         folder_key = f"open_folder_{context_key}_{idx}"
@@ -491,10 +877,17 @@ def render_sources(sources, context_key=""):
             on_click=open_in_explorer,
             args=(entry["file_path"] or entry["folder_path"],)
         )
+        st.markdown("</div>", unsafe_allow_html=True)
 
 # --- PAGES ---
 
 def render_chat_page():
+    render_page_header(
+        "AI Search Console",
+        "Interact with the knowledge base through a cleaner chat surface and quick source access.",
+        kicker="Conversation"
+    )
+    open_panel(tight=True)
     header = st.columns([0.8, 0.2], gap="small")
 
     with header[1]:
@@ -550,28 +943,32 @@ def render_chat_page():
             db.update_session_title(st.session_state.session_id, new_title, st.session_state.user_id)
 
             st.rerun()
+    close_panel()
 
 
 def render_admin_home():
-    st.title("Admin Home")
+    render_page_header(
+        "Admin Home",
+        "Monitor the platform, jump to critical controls, and keep the knowledge base healthy.",
+        kicker="Operations"
+    )
     counts = db.get_system_counts()
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Users", counts["users"])
-    col2.metric("Admins", counts["admins"])
-    col3.metric("Sessions", counts["sessions"])
-    col4.metric("Messages", counts["messages"])
+    render_stat_card(col1, "Users", counts["users"], "Registered accounts")
+    render_stat_card(col2, "Admins", counts["admins"], "Privileged operators")
+    render_stat_card(col3, "Sessions", counts["sessions"], "Tracked conversations")
+    render_stat_card(col4, "Messages", counts["messages"], "Stored exchanges")
 
-    st.subheader("Quick Actions")
+    open_panel("Quick Actions")
     qa1, qa2, qa3 = st.columns(3)
     qa1.button("Manage Users", on_click=set_page, args=("Admin Users",))
     qa2.button("Manage Chats", on_click=set_page, args=("Admin Chats",))
     qa3.button("Manage Knowledge Base", on_click=set_page, args=("Admin Knowledge Base",))
+    close_panel()
 
-    st.subheader("Knowledge Base Status")
-    if os.path.exists(PROCESSED_PATH) and os.path.exists(PROCESSED_DB_PATH):
-        st.success("System Online")
-    else:
-        st.error("System Offline")
+    open_panel("Knowledge Base Status")
+    is_online = os.path.exists(PROCESSED_PATH) and os.path.exists(PROCESSED_DB_PATH)
+    render_system_pill(is_online)
     try:
         chunk_count = processed_storage.get_chunk_count()
         st.caption(f"Chunks: {chunk_count}")
@@ -582,11 +979,17 @@ def render_admin_home():
         st.caption(f"Raw files: {len(raw_files)}")
     except Exception as exc:
         st.caption(f"Raw file count unavailable: {exc}")
+    close_panel()
 
 
 def render_admin_users():
-    st.title("Admin Users")
+    render_page_header(
+        "Admin Users",
+        "Create accounts, assign roles, and handle access management without touching application logic.",
+        kicker="Identity"
+    )
     users = db.list_users()
+    open_panel("User Directory")
     if users:
         table = []
         for user_id, username, role, created_at in users:
@@ -599,8 +1002,9 @@ def render_admin_users():
         st.dataframe(table, use_container_width=True, hide_index=True)
     else:
         st.info("No users found.")
+    close_panel()
 
-    st.subheader("Create User")
+    open_panel("Create User")
     with st.form("admin_create_user"):
         new_username = st.text_input("Username", key="admin_new_user_username")
         new_password = st.text_input("Password", type="password", key="admin_new_user_password")
@@ -617,13 +1021,14 @@ def render_admin_users():
                 st.error("Username already exists.")
             except ValueError as exc:
                 st.error(str(exc))
+    close_panel()
 
     if not users:
         return
 
     user_map = {f"{u[1]} (id {u[0]}, {u[2]})": u[0] for u in users}
 
-    st.subheader("Update Role")
+    open_panel("Update Role")
     with st.form("admin_update_role"):
         selected_label = st.selectbox("User", list(user_map.keys()), key="admin_role_user")
         selected_role = st.selectbox("New role", ["user", "admin"], key="admin_role_value")
@@ -638,8 +1043,9 @@ def render_admin_users():
                 st.success("Role updated.")
             except ValueError as exc:
                 st.error(str(exc))
+    close_panel()
 
-    st.subheader("Reset Password")
+    open_panel("Reset Password")
     with st.form("admin_reset_password"):
         selected_label = st.selectbox("User", list(user_map.keys()), key="admin_pw_user")
         new_password = st.text_input("New password", type="password", key="admin_pw_value")
@@ -656,8 +1062,9 @@ def render_admin_users():
                 st.success("Password updated.")
             except ValueError as exc:
                 st.error(str(exc))
+    close_panel()
 
-    st.subheader("Delete User")
+    open_panel("Delete User")
     with st.form("admin_delete_user"):
         selected_label = st.selectbox("User", list(user_map.keys()), key="admin_delete_user")
         confirm = st.checkbox("I understand this deletes the user and all their chats", key="admin_delete_confirm")
@@ -671,11 +1078,17 @@ def render_admin_users():
         else:
             db.delete_user(target_id)
             st.success("User deleted.")
+    close_panel()
 
 
 def render_admin_chats():
-    st.title("Admin Chats")
+    render_page_header(
+        "Admin Chats",
+        "Audit conversation history, filter by owner, and remove sessions when required.",
+        kicker="Conversation Ops"
+    )
     users = db.list_users()
+    open_panel("Chat Sessions")
     filter_options = [("All users", None)]
     filter_options.extend([(f"{u[1]} (id {u[0]})", u[0]) for u in users])
     filter_label = st.selectbox("Filter by user", [opt[0] for opt in filter_options], key="admin_chat_filter")
@@ -714,10 +1127,15 @@ def render_admin_chats():
                 st.success(f"Deleted {len(selected)} session(s).")
     else:
         st.info("No sessions found.")
+    close_panel()
 
 
 def render_admin_knowledge_base():
-    st.title("Admin Knowledge Base")
+    render_page_header(
+        "Admin Knowledge Base",
+        "Configure retrieval, manage crawler folders, upload source files, and trigger refreshes.",
+        kicker="Index Management"
+    )
 
     settings = settings_manager.load_settings()
     rag_settings = settings.get("rag", {})
@@ -729,7 +1147,7 @@ def render_admin_knowledge_base():
     current_engine = (rag_settings.get("engine") or "cloud").lower()
     engine_index = 1 if current_engine == "local" else 0
 
-    st.subheader("Reasoning Engine")
+    open_panel("Reasoning Engine")
     selected_engine = st.selectbox("Engine", engine_options, index=engine_index, key="rag_engine_select")
     st.caption(f"Cloud model: {rag_settings.get('cloud_model', 'gemini-2.5-flash')}")
     st.caption(f"Local model: {rag_settings.get('local_model', 'gemma2:2b')}")
@@ -754,11 +1172,12 @@ def render_admin_knowledge_base():
             st.success(message)
         else:
             st.error(message)
+    close_panel()
 
     configured_folders = settings_manager.get_configured_crawler_folders(settings, base_dir=BASE_DIR)
     effective_folders = settings_manager.get_effective_crawler_folders(settings, RAW_DATA_DIR, base_dir=BASE_DIR)
 
-    st.subheader("Crawler Folders")
+    open_panel("Crawler Folders")
     st.caption("Leave empty to use the default data/raw folder.")
     folders_text = st.text_area(
         "Folders (one per line)",
@@ -792,8 +1211,9 @@ def render_admin_knowledge_base():
                 on_click=open_in_explorer,
                 args=(folder,)
             )
+    close_panel()
 
-    st.subheader("Upload and Refresh")
+    open_panel("Upload and Refresh")
     upload_targets = effective_folders or [RAW_DATA_DIR]
     upload_target = st.selectbox("Upload destination", upload_targets, index=0)
 
@@ -830,8 +1250,9 @@ def render_admin_knowledge_base():
     last_error = pipeline_state.get("last_refresh_error")
     if last_error and last_status == "error":
         st.error(f"Last refresh error: {last_error}")
+    close_panel()
 
-    st.subheader("Raw Files")
+    open_panel("Raw Files")
     folder_for_listing = st.selectbox("Folder", upload_targets, index=0, key="raw_files_folder")
     listing_cols = st.columns([0.75, 0.25], gap="small")
     listing_cols[0].markdown(f"`{folder_for_listing}`")
@@ -872,17 +1293,23 @@ def render_admin_knowledge_base():
                     st.success(f"Deleted {deleted} file(s).")
     else:
         st.info("No raw files found.")
+    close_panel()
 
 
 def render_admin_usage():
-    st.title("Admin Usage")
+    render_page_header(
+        "Admin Usage",
+        "Track adoption across users and get a high-level view of session and message volume.",
+        kicker="Analytics"
+    )
     rows = db.get_usage_by_user()
     total_sessions = sum(row[3] for row in rows)
     total_messages = sum(row[4] for row in rows)
     col1, col2 = st.columns(2)
-    col1.metric("Total Sessions", total_sessions)
-    col2.metric("Total Messages", total_messages)
+    render_stat_card(col1, "Total Sessions", total_sessions, "Across all users")
+    render_stat_card(col2, "Total Messages", total_messages, "Conversation volume")
 
+    open_panel("Usage by User")
     if rows:
         table = []
         for user_id, username, role, sessions, messages, last_session in rows:
@@ -897,26 +1324,32 @@ def render_admin_usage():
         st.dataframe(table, use_container_width=True, hide_index=True)
     else:
         st.info("No usage data available.")
+    close_panel()
 
 
 # --- SIDEBAR ---
 with st.sidebar:
-    st.title("Search Assistant")
-    st.caption(f"Signed in as {st.session_state.username} ({st.session_state.role})")
+    st.markdown(
+        f"""
+        <div class="sidebar-brand">
+            <div class="sidebar-title">Semantic Search Assistant</div>
+            <div class="sidebar-subtitle">Signed in as {st.session_state.username} ({st.session_state.role})</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     if st.button("Logout", use_container_width=True):
         logout()
 
     rate_limit_placeholder = st.empty()
 
     if st.session_state.role == "admin":
-        st.subheader("Admin Panel")
-        admin_pages = ensure_admin_page()
-        st.radio("Navigation", admin_pages, key="page")
+        render_admin_sidebar_nav()
     else:
         st.session_state.page = "Chat"
 
     if st.session_state.page == "Chat":
-        st.subheader("Chat History")
+        render_sidebar_section("Chat History")
 
         if st.button("New Chat", use_container_width=True):
             new_chat()
@@ -939,10 +1372,7 @@ with st.sidebar:
 
         st.divider()
 
-    if os.path.exists(PROCESSED_PATH) and os.path.exists(PROCESSED_DB_PATH):
-        st.success("System Online")
-    else:
-        st.error("System Offline")
+    render_system_pill(os.path.exists(PROCESSED_PATH) and os.path.exists(PROCESSED_DB_PATH))
 
 
 # --- MAIN CONTENT ---
