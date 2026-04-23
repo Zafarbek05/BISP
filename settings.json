@@ -1,24 +1,23 @@
 {
   "version": 1,
   "rag": {
-    "engine": "cloud",
+    "engine": "local",
     "cloud_model": "gemini-2.5-flash",
     "local_model": "gemma2:2b",
     "ollama_url": "http://localhost:11434"
   },
   "crawler": {
     "folders": [
-      "C:\\Users\\Zafarbek\\Desktop\\masters prep\\sparck ai scholarship",
-      "C:\\Users\\Zafarbek\\Desktop\\BISP\\final project\\data\\raw"
+      "C:\\Users\\Zafarbek\\Desktop\\masters prep\\sparck ai scholarship"
     ]
   },
   "pipeline": {
-    "refresh_request_id": 0,
-    "last_refresh_id": 0,
-    "last_refresh_at": null,
-    "last_refresh_status": null,
-    "last_refresh_error": null,
-    "refresh_requested_by": null,
-    "refresh_requested_at": null
+    "refresh_request_id": 1,
+    "last_refresh_id": 1,
+    "last_refresh_at": 1776943702,
+    "last_refresh_status": "error",
+    "last_refresh_error": "No module named 'exceptions'",
+    "refresh_requested_by": "admin",
+    "refresh_requested_at": 1776943701
   }
 }

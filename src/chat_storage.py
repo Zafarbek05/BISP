@@ -24,90 +24,135 @@ def _normalize_username(username: str) -> str:
     return username.strip().lower()
 
 
+def _hash_password(password: str) -> str:
+    salt = bcrypt.gensalt()
+    try:
+        salt_value = salt.encode("utf-8") if isinstance(salt, str) else salt
+        hashed = bcrypt.hashpw(password.encode("utf-8"), salt_value)
+    except TypeError:
+        # Some bcrypt builds expect str instead of bytes.
+        hashed = bcrypt.hashpw(password, salt)
+
+    return hashed.decode("utf-8") if isinstance(hashed, bytes) else hashed
+
+
+def _check_password(password: str, password_hash: str) -> bool:
+    checker = getattr(bcrypt, "checkpw", None)
+    if checker is not None:
+        try:
+            return checker(password.encode("utf-8"), password_hash.encode("utf-8"))
+        except TypeError:
+            # Some bcrypt builds expect str instead of bytes.
+            return checker(password, password_hash)
+
+    try:
+        computed = bcrypt.hashpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+    except TypeError:
+        # Some bcrypt builds expect str instead of bytes, or may not provide checkpw.
+        computed = bcrypt.hashpw(password, password_hash)
+
+    if isinstance(computed, bytes):
+        computed = computed.decode("utf-8")
+    return computed == password_hash
+
+
 def init_db():
     """Creates the necessary tables if they don't exist."""
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = _get_conn()
-    c = conn.cursor()
+    try:
+        c = conn.cursor()
 
-    # Table for Users
-    c.execute('''CREATE TABLE IF NOT EXISTS users
-                 (
-                     id
-                     INTEGER
-                     PRIMARY
-                     KEY
-                     AUTOINCREMENT,
-                     username
-                     TEXT
-                     UNIQUE
-                     NOT
-                     NULL,
-                     password_hash
-                     TEXT
-                     NOT
-                     NULL,
-                     role
-                     TEXT
-                     NOT
-                     NULL,
-                     created_at
-                     DATETIME
-                     DEFAULT
-                     CURRENT_TIMESTAMP
-                 )''')
+        # Table for Users
+        c.execute('''CREATE TABLE IF NOT EXISTS users
+                     (
+                         id
+                         INTEGER
+                         PRIMARY
+                         KEY
+                         AUTOINCREMENT,
+                         username
+                         TEXT
+                         UNIQUE
+                         NOT
+                         NULL,
+                         password_hash
+                         TEXT
+                         NOT
+                         NULL,
+                         role
+                         TEXT
+                         NOT
+                         NULL,
+                         created_at
+                         DATETIME
+                         DEFAULT
+                         CURRENT_TIMESTAMP
+                     )''')
 
-    # Table for Chat Sessions
-    c.execute('''CREATE TABLE IF NOT EXISTS sessions
-                 (
-                     id
-                     INTEGER
-                     PRIMARY
-                     KEY
-                     AUTOINCREMENT,
-                     title
-                     TEXT,
-                     user_id
-                     INTEGER,
-                     timestamp
-                     DATETIME
-                     DEFAULT
-                     CURRENT_TIMESTAMP
-                 )''')
+        # Table for Chat Sessions
+        c.execute('''CREATE TABLE IF NOT EXISTS sessions
+                     (
+                         id
+                         INTEGER
+                         PRIMARY
+                         KEY
+                         AUTOINCREMENT,
+                         title
+                         TEXT,
+                         user_id
+                         INTEGER,
+                         timestamp
+                         DATETIME
+                         DEFAULT
+                         CURRENT_TIMESTAMP
+                     )''')
 
-    # Ensure user_id column exists for older DBs
-    c.execute("PRAGMA table_info(sessions)")
-    session_columns = [row[1] for row in c.fetchall()]
-    if "user_id" not in session_columns:
-        c.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER")
+        # Ensure user_id column exists for older DBs
+        c.execute("PRAGMA table_info(sessions)")
+        session_columns = [row[1] for row in c.fetchall()]
+        if "user_id" not in session_columns:
+            c.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER")
 
-    # Table for Messages
-    c.execute('''CREATE TABLE IF NOT EXISTS messages
-    (
-        id
-        INTEGER
-        PRIMARY
-        KEY
-        AUTOINCREMENT,
-        session_id
-        INTEGER,
-        role
-        TEXT,
-        content
-        TEXT,
-        sources
-        TEXT,
-        FOREIGN
-        KEY
-                 (
-        session_id
-                 ) REFERENCES sessions
-                 (
-                     id
-                 ))''')
+        # Table for Messages
+        c.execute('''CREATE TABLE IF NOT EXISTS messages
+        (
+            id
+            INTEGER
+            PRIMARY
+            KEY
+            AUTOINCREMENT,
+            session_id
+            INTEGER,
+            role
+            TEXT,
+            content
+            TEXT,
+            sources
+            TEXT,
+            FOREIGN
+            KEY
+                     (
+            session_id
+                     ) REFERENCES sessions
+                     (
+                         id
+                     ))''')
 
-    conn.commit()
-    conn.close()
+        conn.commit()
+    except MemoryError as exc:
+        raise RuntimeError(
+            f"Unable to open database at {DB_PATH}. This usually means the DB key is wrong for an existing "
+            "encrypted DB file (or the file is corrupted). Check that DB_KEY in .env matches the key used "
+            "to create this DB, or backup and recreate data\\chat_history.db."
+        ) from exc
+    except Exception as exc:
+        raise RuntimeError(
+            f"Database initialization failed for {DB_PATH}: {exc}. If this DB was encrypted with SQLCipher, "
+            "verify DB_KEY in .env."
+        ) from exc
+    finally:
+        conn.close()
 
 
 def get_user_count():
@@ -127,7 +172,7 @@ def create_user(username, password, role="user"):
         raise ValueError("Invalid role.")
 
     normalized = _normalize_username(username)
-    password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    password_hash = _hash_password(password)
 
     conn = _get_conn()
     c = conn.cursor()
@@ -155,7 +200,7 @@ def verify_user(username, password):
     user = get_user_by_username(username)
     if not user:
         return None
-    if bcrypt.checkpw(password.encode("utf-8"), user["password_hash"].encode("utf-8")):
+    if _check_password(password, user["password_hash"]):
         return {"id": user["id"], "username": user["username"], "role": user["role"]}
     return None
 
@@ -301,7 +346,7 @@ def update_user_role(user_id, role):
 def reset_user_password(user_id, password):
     if not password:
         raise ValueError("Password is required.")
-    password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    password_hash = _hash_password(password)
     conn = _get_conn()
     c = conn.cursor()
     c.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, user_id))

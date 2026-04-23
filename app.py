@@ -57,6 +57,7 @@ theme_tokens = {
     "chat_bg": "rgba(255, 255, 255, 0.72)" if is_light_theme else "rgba(9, 21, 36, 0.68)",
     "chat_user_bg": "rgba(229, 238, 255, 0.95)" if is_light_theme else "rgba(21, 40, 67, 0.84)",
     "input_bg": "rgba(255, 255, 255, 0.92)" if is_light_theme else "rgba(8, 19, 32, 0.9)",
+    "admin_chip": "rgba(20, 120, 255, 0.12)" if is_light_theme else "rgba(110, 231, 255, 0.14)",
 }
 
 theme_css = Template("""
@@ -72,6 +73,7 @@ theme_css = Template("""
         --warning: $warning;
         --danger: $danger;
         --shadow: $shadow;
+        --admin-chip: $admin_chip;
     }
 
     html, body, [data-testid="stAppViewContainer"], .stApp {
@@ -150,6 +152,63 @@ theme_css = Template("""
 
     .panel.tight {
         padding-top: 1.15rem;
+    }
+
+    .admin-shell {
+        position: relative;
+    }
+
+    .admin-shell::before {
+        content: "";
+        position: absolute;
+        inset: -0.4rem -0.4rem auto -0.4rem;
+        height: 220px;
+        pointer-events: none;
+        background: radial-gradient(circle at 20% 0%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 58%);
+        z-index: -1;
+    }
+
+    .admin-shell .page-hero {
+        border-radius: 24px;
+        background:
+            linear-gradient(125deg, color-mix(in srgb, var(--accent) 18%, transparent), var(--panel) 48%, color-mix(in srgb, var(--accent-2) 18%, transparent));
+    }
+
+    .admin-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        margin: 0 0 0.85rem;
+        padding: 0.38rem 0.72rem;
+        border-radius: 999px;
+        border: 1px solid var(--panel-border);
+        background: var(--admin-chip);
+        color: var(--text);
+        font-size: 0.76rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-weight: 700;
+    }
+
+    .admin-panel-note {
+        margin: -0.2rem 0 0.9rem;
+        color: var(--muted);
+        font-size: 0.9rem;
+    }
+
+    .admin-toolbar {
+        margin-top: 0.3rem;
+        display: grid;
+        gap: 0.75rem;
+    }
+
+    .admin-shell [data-testid="stDataFrame"] {
+        border-radius: 18px;
+        box-shadow: 0 16px 40px rgba(1, 8, 20, 0.14);
+    }
+
+    .admin-shell .stForm {
+        padding: 0.35rem 0.1rem 0.2rem;
     }
 
     .section-label {
@@ -439,6 +498,14 @@ def render_page_header(title, subtitle, kicker="Control Surface"):
         """,
         unsafe_allow_html=True,
     )
+
+
+def render_admin_pill(text):
+    st.markdown(f'<div class="admin-pill">{text}</div>', unsafe_allow_html=True)
+
+
+def render_admin_panel_note(text):
+    st.markdown(f'<div class="admin-panel-note">{text}</div>', unsafe_allow_html=True)
 
 
 def open_panel(label=None, tight=False):
@@ -947,6 +1014,8 @@ def render_chat_page():
 
 
 def render_admin_home():
+    st.markdown('<div class="admin-shell">', unsafe_allow_html=True)
+    render_admin_pill("Admin Workspace")
     render_page_header(
         "Admin Home",
         "Monitor the platform, jump to critical controls, and keep the knowledge base healthy.",
@@ -960,10 +1029,13 @@ def render_admin_home():
     render_stat_card(col4, "Messages", counts["messages"], "Stored exchanges")
 
     open_panel("Quick Actions")
+    render_admin_panel_note("Use these shortcuts to jump directly into common admin operations.")
+    st.markdown('<div class="admin-toolbar">', unsafe_allow_html=True)
     qa1, qa2, qa3 = st.columns(3)
     qa1.button("Manage Users", on_click=set_page, args=("Admin Users",))
     qa2.button("Manage Chats", on_click=set_page, args=("Admin Chats",))
     qa3.button("Manage Knowledge Base", on_click=set_page, args=("Admin Knowledge Base",))
+    st.markdown('</div>', unsafe_allow_html=True)
     close_panel()
 
     open_panel("Knowledge Base Status")
@@ -980,9 +1052,12 @@ def render_admin_home():
     except Exception as exc:
         st.caption(f"Raw file count unavailable: {exc}")
     close_panel()
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 def render_admin_users():
+    st.markdown('<div class="admin-shell">', unsafe_allow_html=True)
+    render_admin_pill("Identity & Access")
     render_page_header(
         "Admin Users",
         "Create accounts, assign roles, and handle access management without touching application logic.",
@@ -990,6 +1065,7 @@ def render_admin_users():
     )
     users = db.list_users()
     open_panel("User Directory")
+    render_admin_panel_note("Review account ownership and role distribution before applying security changes.")
     if users:
         table = []
         for user_id, username, role, created_at in users:
@@ -1005,6 +1081,7 @@ def render_admin_users():
     close_panel()
 
     open_panel("Create User")
+    render_admin_panel_note("Create operators with minimum required privileges.")
     with st.form("admin_create_user"):
         new_username = st.text_input("Username", key="admin_new_user_username")
         new_password = st.text_input("Password", type="password", key="admin_new_user_password")
@@ -1029,6 +1106,7 @@ def render_admin_users():
     user_map = {f"{u[1]} (id {u[0]}, {u[2]})": u[0] for u in users}
 
     open_panel("Update Role")
+    render_admin_panel_note("Role updates apply immediately to permissions and page access.")
     with st.form("admin_update_role"):
         selected_label = st.selectbox("User", list(user_map.keys()), key="admin_role_user")
         selected_role = st.selectbox("New role", ["user", "admin"], key="admin_role_value")
@@ -1046,6 +1124,7 @@ def render_admin_users():
     close_panel()
 
     open_panel("Reset Password")
+    render_admin_panel_note("Password resets invalidate old credentials right away.")
     with st.form("admin_reset_password"):
         selected_label = st.selectbox("User", list(user_map.keys()), key="admin_pw_user")
         new_password = st.text_input("New password", type="password", key="admin_pw_value")
@@ -1065,6 +1144,7 @@ def render_admin_users():
     close_panel()
 
     open_panel("Delete User")
+    render_admin_panel_note("This action permanently removes user data including sessions and messages.")
     with st.form("admin_delete_user"):
         selected_label = st.selectbox("User", list(user_map.keys()), key="admin_delete_user")
         confirm = st.checkbox("I understand this deletes the user and all their chats", key="admin_delete_confirm")
@@ -1079,9 +1159,12 @@ def render_admin_users():
             db.delete_user(target_id)
             st.success("User deleted.")
     close_panel()
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 def render_admin_chats():
+    st.markdown('<div class="admin-shell">', unsafe_allow_html=True)
+    render_admin_pill("Conversation Governance")
     render_page_header(
         "Admin Chats",
         "Audit conversation history, filter by owner, and remove sessions when required.",
@@ -1089,6 +1172,7 @@ def render_admin_chats():
     )
     users = db.list_users()
     open_panel("Chat Sessions")
+    render_admin_panel_note("Filter, inspect, and remove sessions to keep workspace data clean.")
     filter_options = [("All users", None)]
     filter_options.extend([(f"{u[1]} (id {u[0]})", u[0]) for u in users])
     filter_label = st.selectbox("Filter by user", [opt[0] for opt in filter_options], key="admin_chat_filter")
@@ -1128,9 +1212,12 @@ def render_admin_chats():
     else:
         st.info("No sessions found.")
     close_panel()
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 def render_admin_knowledge_base():
+    st.markdown('<div class="admin-shell">', unsafe_allow_html=True)
+    render_admin_pill("Knowledge Operations")
     render_page_header(
         "Admin Knowledge Base",
         "Configure retrieval, manage crawler folders, upload source files, and trigger refreshes.",
@@ -1148,6 +1235,7 @@ def render_admin_knowledge_base():
     engine_index = 1 if current_engine == "local" else 0
 
     open_panel("Reasoning Engine")
+    render_admin_panel_note("Switch between cloud and local reasoning engines without leaving the dashboard.")
     selected_engine = st.selectbox("Engine", engine_options, index=engine_index, key="rag_engine_select")
     st.caption(f"Cloud model: {rag_settings.get('cloud_model', 'gemini-2.5-flash')}")
     st.caption(f"Local model: {rag_settings.get('local_model', 'gemma2:2b')}")
@@ -1178,6 +1266,7 @@ def render_admin_knowledge_base():
     effective_folders = settings_manager.get_effective_crawler_folders(settings, RAW_DATA_DIR, base_dir=BASE_DIR)
 
     open_panel("Crawler Folders")
+    render_admin_panel_note("Set one or more source folders used by the ingestion pipeline.")
     st.caption("Leave empty to use the default data/raw folder.")
     folders_text = st.text_area(
         "Folders (one per line)",
@@ -1214,6 +1303,7 @@ def render_admin_knowledge_base():
     close_panel()
 
     open_panel("Upload and Refresh")
+    render_admin_panel_note("Upload validated documents, then queue a refresh to index new content.")
     upload_targets = effective_folders or [RAW_DATA_DIR]
     upload_target = st.selectbox("Upload destination", upload_targets, index=0)
 
@@ -1253,6 +1343,7 @@ def render_admin_knowledge_base():
     close_panel()
 
     open_panel("Raw Files")
+    render_admin_panel_note("Manage files currently available for indexing in selected source folders.")
     folder_for_listing = st.selectbox("Folder", upload_targets, index=0, key="raw_files_folder")
     listing_cols = st.columns([0.75, 0.25], gap="small")
     listing_cols[0].markdown(f"`{folder_for_listing}`")
@@ -1294,9 +1385,12 @@ def render_admin_knowledge_base():
     else:
         st.info("No raw files found.")
     close_panel()
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 def render_admin_usage():
+    st.markdown('<div class="admin-shell">', unsafe_allow_html=True)
+    render_admin_pill("Platform Analytics")
     render_page_header(
         "Admin Usage",
         "Track adoption across users and get a high-level view of session and message volume.",
@@ -1310,6 +1404,7 @@ def render_admin_usage():
     render_stat_card(col2, "Total Messages", total_messages, "Conversation volume")
 
     open_panel("Usage by User")
+    render_admin_panel_note("Track engagement and activity by user to detect trends and anomalies.")
     if rows:
         table = []
         for user_id, username, role, sessions, messages, last_session in rows:
@@ -1325,6 +1420,7 @@ def render_admin_usage():
     else:
         st.info("No usage data available.")
     close_panel()
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 # --- SIDEBAR ---

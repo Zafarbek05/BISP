@@ -23,7 +23,7 @@ PROCESSED_DATA_DIR = os.path.join(BASE_DIR, "data", "processed")
 api_key = os.getenv("GEMINI_API_KEY")
 
 # --- INITIALIZATION ---
-DEFAULT_CLOUD_MODEL = "gemini-2.5-flash"
+DEFAULT_CLOUD_MODEL = "gemma3:1b"
 DEFAULT_LOCAL_MODEL = "gemma2:2b"
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
 
@@ -78,7 +78,12 @@ def get_genai_client():
         if not api_key:
             raise ValueError("API Key not found. Please check your .env file in the root directory.")
         # Lazy import to reduce import-time overhead.
-        from google import genai
+        try:
+            from google import genai
+        except ImportError as exc:
+            raise RuntimeError(
+                "Google GenAI SDK is missing. Install dependency: pip install google-genai"
+            ) from exc
         genai_client = genai.Client(api_key=api_key)
     return genai_client
 
@@ -133,13 +138,15 @@ def get_relevant_context(query, top_k=5):
     top_indices = similarities.argsort()[-top_k:][::-1]
 
     context_text = ""
-    sources = []
     for idx in top_indices:
         context_text += f"\n--- SOURCE FILE: {all_chunks[idx]['source']} ---\n"
         context_text += f"CONTENT: {all_chunks[idx]['content']}\n"
-        sources.append(all_chunks[idx].get("path") or all_chunks[idx]["source"])
 
-    return context_text, list(dict.fromkeys(sources))
+    # Show only the single most relevant source in the chat UI.
+    best_idx = int(top_indices[0])
+    best_source = all_chunks[best_idx].get("path") or all_chunks[best_idx]["source"]
+
+    return context_text, [best_source]
 
 
 def build_rag_prompt(query):
@@ -164,7 +171,12 @@ def build_rag_prompt(query):
 def generate_with_gemini(prompt, system_instr, model_name):
     client = get_genai_client()
     # Lazy import here to avoid overhead at module import time.
-    from google.genai import types
+    try:
+        from google.genai import types
+    except ImportError as exc:
+        raise RuntimeError(
+            "Google GenAI SDK is missing. Install dependency: pip install google-genai"
+        ) from exc
 
     response = client.models.generate_content(
         model=model_name,

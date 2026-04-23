@@ -6,7 +6,6 @@ import sys
 import time
 import urllib.request
 
-
 def _build_env(root_dir: str) -> dict:
     env = os.environ.copy()
     existing = env.get("PYTHONPATH", "")
