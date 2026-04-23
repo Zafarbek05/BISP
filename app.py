@@ -6,6 +6,7 @@ import sys
 import importlib
 from string import Template
 from pathlib import Path
+from html import escape
 import streamlit as st
 import src.chat_storage as db
 import src.processed_storage as processed_storage
@@ -58,6 +59,21 @@ theme_tokens = {
     "chat_user_bg": "rgba(229, 238, 255, 0.95)" if is_light_theme else "rgba(21, 40, 67, 0.84)",
     "input_bg": "rgba(255, 255, 255, 0.92)" if is_light_theme else "rgba(8, 19, 32, 0.9)",
     "admin_chip": "rgba(20, 120, 255, 0.12)" if is_light_theme else "rgba(110, 231, 255, 0.14)",
+    "border_subtle": "rgba(16, 33, 58, 0.08)" if is_light_theme else "rgba(232, 240, 255, 0.11)",
+    "radius_sm": "12px",
+    "radius_md": "16px",
+    "radius_lg": "22px",
+    "space_1": "0.375rem",
+    "space_2": "0.5rem",
+    "space_3": "0.75rem",
+    "space_4": "1rem",
+    "space_5": "1.5rem",
+    "space_6": "2rem",
+    "font_sm": "0.82rem",
+    "font_md": "0.96rem",
+    "font_lg": "1.16rem",
+    "font_xl": "clamp(1.9rem, 3vw, 2.8rem)",
+    "content_max": "1200px",
 }
 
 theme_css = Template("""
@@ -65,6 +81,7 @@ theme_css = Template("""
     :root {
         --panel: $panel;
         --panel-border: $panel_border;
+        --border-subtle: $border_subtle;
         --text: $text;
         --muted: $muted;
         --accent: $accent;
@@ -74,6 +91,20 @@ theme_css = Template("""
         --danger: $danger;
         --shadow: $shadow;
         --admin-chip: $admin_chip;
+        --radius-sm: $radius_sm;
+        --radius-md: $radius_md;
+        --radius-lg: $radius_lg;
+        --space-1: $space_1;
+        --space-2: $space_2;
+        --space-3: $space_3;
+        --space-4: $space_4;
+        --space-5: $space_5;
+        --space-6: $space_6;
+        --font-sm: $font_sm;
+        --font-md: $font_md;
+        --font-lg: $font_lg;
+        --font-xl: $font_xl;
+        --content-max: $content_max;
     }
 
     html, body, [data-testid="stAppViewContainer"], .stApp {
@@ -98,18 +129,33 @@ theme_css = Template("""
     }
 
     [data-testid="block-container"] {
-        padding-top: 2.6rem;
-        padding-bottom: 2.8rem;
+        max-width: var(--content-max);
+        margin: 0 auto;
+        padding-top: var(--space-6);
+        padding-bottom: var(--space-6);
+        padding-left: var(--space-4);
+        padding-right: var(--space-4);
     }
 
     .page-shell {
         position: relative;
+        display: grid;
+        gap: var(--space-5);
+    }
+
+    .workspace-shell::before {
+        content: "";
+        position: absolute;
+        inset: -0.2rem -0.2rem auto -0.2rem;
+        height: 170px;
+        pointer-events: none;
+        background: radial-gradient(circle at 75% 0%, color-mix(in srgb, var(--accent-2) 14%, transparent), transparent 58%);
+        z-index: -1;
     }
 
     .page-hero {
-        padding: 1.8rem 1.9rem;
-        margin-bottom: 1.45rem;
-        border-radius: 22px;
+        padding: calc(var(--space-5) + var(--space-2)) calc(var(--space-5) + var(--space-3));
+        border-radius: var(--radius-lg);
         border: 1px solid var(--panel-border);
         background:
             linear-gradient(135deg, rgba(79, 140, 255, 0.18), var(--panel) 42%, rgba(110, 231, 255, 0.08));
@@ -117,16 +163,16 @@ theme_css = Template("""
     }
 
     .page-kicker {
-        font-size: 0.72rem;
+        font-size: var(--font-sm);
         letter-spacing: 0.18em;
         text-transform: uppercase;
         color: var(--accent);
         font-weight: 700;
-        margin-bottom: 0.55rem;
+        margin-bottom: var(--space-2);
     }
 
     .page-title {
-        font-size: clamp(1.9rem, 3vw, 2.8rem);
+        font-size: var(--font-xl);
         line-height: 1.05;
         margin: 0;
         font-weight: 800;
@@ -134,16 +180,23 @@ theme_css = Template("""
     }
 
     .page-subtitle {
-        margin-top: 0.45rem;
+        margin-top: var(--space-2);
         max-width: 58rem;
         color: var(--muted);
-        font-size: 0.98rem;
+        font-size: var(--font-md);
+    }
+
+    .page-header-actions {
+        margin-top: var(--space-3);
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-3);
     }
 
     .panel {
-        padding: 1.45rem 1.5rem;
-        margin-bottom: 1.35rem;
-        border-radius: 20px;
+        padding: var(--space-5);
+        margin-bottom: var(--space-5);
+        border-radius: var(--radius-md);
         background: var(--panel);
         border: 1px solid var(--panel-border);
         box-shadow: var(--shadow);
@@ -151,7 +204,7 @@ theme_css = Template("""
     }
 
     .panel.tight {
-        padding-top: 1.15rem;
+        padding-top: calc(var(--space-4) + var(--space-1));
     }
 
     .admin-shell {
@@ -169,7 +222,7 @@ theme_css = Template("""
     }
 
     .admin-shell .page-hero {
-        border-radius: 24px;
+        border-radius: var(--radius-lg);
         background:
             linear-gradient(125deg, color-mix(in srgb, var(--accent) 18%, transparent), var(--panel) 48%, color-mix(in srgb, var(--accent-2) 18%, transparent));
     }
@@ -178,22 +231,51 @@ theme_css = Template("""
         display: inline-flex;
         align-items: center;
         gap: 0.45rem;
-        margin: 0 0 0.85rem;
-        padding: 0.38rem 0.72rem;
+        margin: 0 0 var(--space-3);
+        padding: var(--space-1) var(--space-3);
         border-radius: 999px;
-        border: 1px solid var(--panel-border);
+        border: 1px solid var(--border-subtle);
         background: var(--admin-chip);
         color: var(--text);
-        font-size: 0.76rem;
+        font-size: var(--font-sm);
         letter-spacing: 0.08em;
         text-transform: uppercase;
         font-weight: 700;
     }
 
+    .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+        margin: 0 0 var(--space-3);
+        padding: var(--space-1) var(--space-3);
+        border-radius: 999px;
+        border: 1px solid var(--border-subtle);
+        font-size: var(--font-sm);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-weight: 700;
+    }
+
+    .badge-info {
+        background: color-mix(in srgb, var(--accent) 16%, transparent);
+        color: var(--accent);
+    }
+
+    .badge-admin {
+        background: var(--admin-chip);
+        color: var(--text);
+    }
+
+    .badge-success {
+        background: color-mix(in srgb, var(--success) 20%, transparent);
+        color: var(--success);
+    }
+
     .admin-panel-note {
-        margin: -0.2rem 0 0.9rem;
+        margin: -0.2rem 0 var(--space-4);
         color: var(--muted);
-        font-size: 0.9rem;
+        font-size: var(--font-md);
     }
 
     .admin-toolbar {
@@ -212,27 +294,44 @@ theme_css = Template("""
     }
 
     .section-label {
-        margin-bottom: 1rem;
+        margin-bottom: var(--space-4);
         color: var(--text);
-        font-size: 1rem;
+        font-size: var(--font-lg);
         font-weight: 700;
         letter-spacing: 0.01em;
     }
 
     .metric-card {
-        padding: 1.15rem 1.2rem;
-        border-radius: 18px;
+        padding: calc(var(--space-4) + var(--space-1)) var(--space-4);
+        border-radius: var(--radius-md);
         background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 86%, white 14%), var(--panel));
         border: 1px solid var(--panel-border);
         box-shadow: var(--shadow);
     }
 
+    .stats-row {
+        margin-top: var(--space-5);
+        margin-bottom: var(--space-5);
+    }
+
+    .section-separator {
+        height: 1px;
+        margin: var(--space-4) 0;
+        border-radius: 999px;
+        background: linear-gradient(
+            90deg,
+            color-mix(in srgb, var(--panel-border) 60%, transparent),
+            color-mix(in srgb, var(--border-subtle) 100%, transparent),
+            color-mix(in srgb, var(--panel-border) 60%, transparent)
+        );
+    }
+
     .metric-label {
         color: var(--muted);
-        font-size: 0.78rem;
+        font-size: var(--font-sm);
         text-transform: uppercase;
         letter-spacing: 0.12em;
-        margin-bottom: 0.4rem;
+        margin-bottom: var(--space-2);
     }
 
     .metric-value {
@@ -243,9 +342,38 @@ theme_css = Template("""
     }
 
     .metric-note {
-        margin-top: 0.45rem;
+        margin-top: var(--space-2);
         color: var(--accent);
-        font-size: 0.82rem;
+        font-size: var(--font-sm);
+    }
+
+    .metric-note.metric-positive {
+        color: var(--success);
+    }
+
+    .card {
+        padding: var(--space-5);
+        border-radius: var(--radius-md);
+        border: 1px solid var(--panel-border);
+        background: color-mix(in srgb, var(--panel) 93%, transparent);
+    }
+
+    .card-title {
+        color: var(--text);
+        font-size: var(--font-lg);
+        font-weight: 700;
+        margin-bottom: var(--space-2);
+    }
+
+    .card-body {
+        color: var(--muted);
+        font-size: var(--font-md);
+    }
+
+    .card-footer {
+        margin-top: var(--space-3);
+        color: var(--muted);
+        font-size: var(--font-sm);
     }
 
     .status-pill {
@@ -274,19 +402,19 @@ theme_css = Template("""
     .status-pill.offline::before { background: var(--danger); }
 
     .source-card {
-        padding: 1rem 1.05rem;
-        margin: 0.55rem 0 0.95rem;
-        border-radius: 16px;
+        padding: var(--space-4);
+        margin: var(--space-2) 0 var(--space-4);
+        border-radius: var(--radius-md);
         border: 1px solid var(--panel-border);
         background: color-mix(in srgb, var(--panel) 92%, transparent);
     }
 
     .source-title {
         color: var(--muted);
-        font-size: 0.78rem;
+        font-size: var(--font-sm);
         text-transform: uppercase;
         letter-spacing: 0.12em;
-        margin-bottom: 0.25rem;
+        margin-bottom: var(--space-1);
     }
 
     .source-file {
@@ -354,7 +482,7 @@ theme_css = Template("""
     .stDownloadButton > button {
         width: 100% !important;
         min-height: 3rem;
-        border-radius: 14px;
+        border-radius: var(--radius-sm);
         border: 1px solid var(--panel-border);
         background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 76%, rgba(79, 140, 255, 0.04)), var(--panel));
         color: var(--text);
@@ -386,9 +514,9 @@ theme_css = Template("""
     }
 
     .stChatMessage {
-        border-radius: 20px;
+        border-radius: var(--radius-md);
         border: 1px solid var(--panel-border);
-        padding: 0.35rem 0.45rem;
+        padding: var(--space-3);
         background: $chat_bg;
         box-shadow: 0 6px 14px rgba(1, 8, 20, 0.07);
     }
@@ -397,10 +525,52 @@ theme_css = Template("""
         background: $chat_user_bg;
     }
 
+    .chat-meta {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: var(--space-3);
+        margin-bottom: var(--space-2);
+    }
+
+    .chat-meta-time {
+        color: var(--muted);
+        font-size: var(--font-sm);
+    }
+
+    .chat-badge {
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        border: 1px solid var(--border-subtle);
+        padding: 0.22rem var(--space-2);
+        font-size: var(--font-sm);
+        color: var(--accent);
+        background: color-mix(in srgb, var(--accent) 12%, transparent);
+    }
+
+    .chat-badge.user {
+        color: var(--text);
+        background: color-mix(in srgb, var(--panel) 90%, transparent);
+    }
+
+    .chat-thinking {
+        margin-bottom: var(--space-2);
+        color: var(--muted);
+        font-size: var(--font-md);
+    }
+
+    .chat-input-hint {
+        margin-top: calc(var(--space-3) * -1);
+        margin-bottom: var(--space-4);
+        color: var(--muted);
+        font-size: var(--font-sm);
+    }
+
     [data-testid="stChatInput"] {
         background: $input_bg;
         border: 1px solid var(--panel-border);
-        border-radius: 18px;
+        border-radius: var(--radius-md);
         box-shadow: var(--shadow);
     }
 
@@ -418,7 +588,7 @@ theme_css = Template("""
         background: $input_bg !important;
         color: var(--text) !important;
         border: 1px solid var(--panel-border) !important;
-        border-radius: 14px !important;
+        border-radius: var(--radius-sm) !important;
     }
 
     .stRadio > div,
@@ -427,14 +597,14 @@ theme_css = Template("""
     }
 
     [data-testid="stDataFrame"] {
-        border-radius: 16px;
+        border-radius: var(--radius-md);
         overflow: hidden;
         border: 1px solid var(--panel-border);
         background: color-mix(in srgb, var(--panel) 94%, transparent);
     }
 
     .stAlert {
-        border-radius: 16px;
+        border-radius: var(--radius-md);
         border-width: 1px;
     }
 
@@ -487,21 +657,29 @@ def render_rate_limit(container):
         st.caption(f"Retry in {int(retry_after)}s")
 
 
-def render_page_header(title, subtitle, kicker="Control Surface"):
+def render_page_header(title, subtitle, kicker="Control Surface", actions=None):
+    actions_html = f'<div class="page-header-actions">{actions}</div>' if actions else ""
     st.markdown(
         f"""
         <div class="page-hero">
-            <div class="page-kicker">{kicker}</div>
-            <h1 class="page-title">{title}</h1>
-            <div class="page-subtitle">{subtitle}</div>
+            <div class="page-kicker">{escape(str(kicker))}</div>
+            <h1 class="page-title">{escape(str(title))}</h1>
+            <div class="page-subtitle">{escape(str(subtitle))}</div>
+            {actions_html}
         </div>
         """,
         unsafe_allow_html=True,
     )
 
 
+def render_badge(text, kind="info"):
+    allowed = {"info", "admin", "success"}
+    kind = kind if kind in allowed else "info"
+    st.markdown(f'<div class="badge badge-{kind}">{escape(str(text))}</div>', unsafe_allow_html=True)
+
+
 def render_admin_pill(text):
-    st.markdown(f'<div class="admin-pill">{text}</div>', unsafe_allow_html=True)
+    render_badge(text, kind="admin")
 
 
 def render_admin_panel_note(text):
@@ -512,30 +690,174 @@ def open_panel(label=None, tight=False):
     panel_class = "panel tight" if tight else "panel"
     st.markdown(f'<div class="{panel_class}">', unsafe_allow_html=True)
     if label:
-        st.markdown(f'<div class="section-label">{label}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="section-label">{escape(str(label))}</div>', unsafe_allow_html=True)
 
 
 def close_panel():
     st.markdown("</div>", unsafe_allow_html=True)
 
 
-def render_stat_card(column, label, value, note):
+def render_card(title, body, footer=None, tone="default"):
+    tone_class = f" card-{tone}" if tone and tone != "default" else ""
+    body_html = escape(str(body)).replace("\n", "<br>")
+    st.markdown(f'<div class="card{tone_class}">', unsafe_allow_html=True)
+    st.markdown(f'<div class="card-title">{escape(str(title))}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="card-body">{body_html}</div>', unsafe_allow_html=True)
+    if footer:
+        st.markdown(f'<div class="card-footer">{escape(str(footer))}</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+def render_separator():
+    st.markdown('<div class="section-separator"></div>', unsafe_allow_html=True)
+
+
+def render_stat_kpi(column, label, value, delta=None):
+    note_class = "metric-note metric-positive" if delta and str(delta).strip().startswith(("+", "↑")) else "metric-note"
+    delta_html = f'<div class="{note_class}">{escape(str(delta))}</div>' if delta else ""
     column.markdown(
         f"""
         <div class="metric-card">
-            <div class="metric-label">{label}</div>
-            <div class="metric-value">{value}</div>
-            <div class="metric-note">{note}</div>
+            <div class="metric-label">{escape(str(label))}</div>
+            <div class="metric-value">{escape(str(value))}</div>
+            {delta_html}
         </div>
         """,
         unsafe_allow_html=True,
     )
 
 
+def render_stat_card(column, label, value, note):
+    render_stat_kpi(column, label, value, delta=note)
+
+
 def render_system_pill(is_online):
     status_class = "online" if is_online else "offline"
     status_text = "System Online" if is_online else "System Offline"
     st.markdown(f'<div class="status-pill {status_class}">{status_text}</div>', unsafe_allow_html=True)
+
+
+def get_page_shell_config(page_name):
+    configs = {
+        "Chat": {
+            "title": "AI Search Console",
+            "subtitle": "Interact with the knowledge base through a cleaner chat surface and quick source access.",
+            "kicker": "Conversation",
+            "badge": "Workspace",
+            "badge_kind": "info",
+        },
+        "Admin Home": {
+            "title": "Admin Home",
+            "subtitle": "Monitor the platform, jump to critical controls, and keep the knowledge base healthy.",
+            "kicker": "Operations",
+            "badge": "Admin Workspace",
+            "badge_kind": "admin",
+        },
+        "Admin Users": {
+            "title": "Admin Users",
+            "subtitle": "Create accounts, assign roles, and handle access management without touching application logic.",
+            "kicker": "Identity",
+            "badge": "Identity & Access",
+            "badge_kind": "admin",
+        },
+        "Admin Chats": {
+            "title": "Admin Chats",
+            "subtitle": "Audit conversation history, filter by owner, and remove sessions when required.",
+            "kicker": "Conversation Ops",
+            "badge": "Conversation Governance",
+            "badge_kind": "admin",
+        },
+        "Admin Knowledge Base": {
+            "title": "Admin Knowledge Base",
+            "subtitle": "Configure retrieval, manage crawler folders, upload source files, and trigger refreshes.",
+            "kicker": "Index Management",
+            "badge": "Knowledge Operations",
+            "badge_kind": "admin",
+        },
+        "Admin Usage": {
+            "title": "Admin Usage",
+            "subtitle": "Track adoption across users and get a high-level view of session and message volume.",
+            "kicker": "Analytics",
+            "badge": "Platform Analytics",
+            "badge_kind": "admin",
+        },
+    }
+    default = {
+        "title": page_name,
+        "subtitle": "",
+        "kicker": "Workspace",
+        "badge": "Workspace",
+        "badge_kind": "info",
+    }
+    return configs.get(page_name, default)
+
+
+def render_app_shell(page_name):
+    shell_class = "admin-shell" if page_name.startswith("Admin") else "workspace-shell"
+    st.markdown(f'<div class="page-shell {shell_class}">', unsafe_allow_html=True)
+    config = get_page_shell_config(page_name)
+    badge_text = config.get("badge")
+    if badge_text:
+        render_badge(badge_text, config.get("badge_kind", "info"))
+    render_page_header(
+        config.get("title", page_name),
+        config.get("subtitle", ""),
+        kicker=config.get("kicker", "Workspace")
+    )
+
+
+def close_app_shell():
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def get_active_model_label():
+    try:
+        settings = settings_manager.load_settings()
+        rag_settings = settings.get("rag", {}) if isinstance(settings, dict) else {}
+    except Exception:
+        rag_settings = {}
+
+    engine = (rag_settings.get("engine") or "cloud").strip().lower()
+    if engine == "local":
+        model = rag_settings.get("local_model") or rag_final_answer.DEFAULT_LOCAL_MODEL
+        return f"Local · {model}"
+    model = rag_settings.get("cloud_model") or rag_final_answer.DEFAULT_CLOUD_MODEL
+    return f"Cloud · {model}"
+
+
+def format_chat_clock(epoch_seconds):
+    if not epoch_seconds:
+        return "Now"
+    try:
+        return time.strftime("%H:%M", time.localtime(epoch_seconds))
+    except Exception:
+        return "Now"
+
+
+def normalize_loaded_messages(messages):
+    normalized = []
+    active_model = get_active_model_label()
+    for message in messages or []:
+        item = dict(message)
+        item.setdefault("timestamp", None)
+        if item.get("role") == "assistant":
+            item.setdefault("model_label", active_model)
+        normalized.append(item)
+    return normalized
+
+
+def render_chat_meta(role, timestamp_text, model_label=None):
+    badge_value = model_label if role == "assistant" else "You"
+    badge_class = "chat-badge" if role == "assistant" else "chat-badge user"
+    st.markdown(
+        f"""
+        <div class="chat-meta">
+            <span class="chat-meta-time">{escape(str(timestamp_text))}</span>
+            <span class="{badge_class}">{escape(str(badge_value))}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_sidebar_section(label):
@@ -683,12 +1005,14 @@ def ensure_active_session():
     if current_id is None or not db.session_belongs_to_user(current_id, user_id):
         if sessions:
             st.session_state.session_id = sessions[0][0]
-            st.session_state.messages = db.get_messages(st.session_state.session_id, user_id)
+            st.session_state.messages = normalize_loaded_messages(
+                db.get_messages(st.session_state.session_id, user_id)
+            )
         else:
             st.session_state.session_id = db.create_session(title="New Chat", user_id=user_id)
             st.session_state.messages = []
     elif "messages" not in st.session_state:
-        st.session_state.messages = db.get_messages(current_id, user_id)
+        st.session_state.messages = normalize_loaded_messages(db.get_messages(current_id, user_id))
 
 
 ensure_active_session()
@@ -696,7 +1020,7 @@ ensure_active_session()
 
 def load_chat(session_id):
     st.session_state.session_id = session_id
-    st.session_state.messages = db.get_messages(session_id, st.session_state.user_id)
+    st.session_state.messages = normalize_loaded_messages(db.get_messages(session_id, st.session_state.user_id))
 
 
 def new_chat():
@@ -738,7 +1062,9 @@ def delete_current_chat():
         remaining = db.get_sessions(st.session_state.user_id)
         if remaining:
             st.session_state.session_id = remaining[0][0]
-            st.session_state.messages = db.get_messages(st.session_state.session_id, st.session_state.user_id)
+            st.session_state.messages = normalize_loaded_messages(
+                db.get_messages(st.session_state.session_id, st.session_state.user_id)
+            )
         else:
             new_chat()
     else:
@@ -949,11 +1275,7 @@ def render_sources(sources, context_key=""):
 # --- PAGES ---
 
 def render_chat_page():
-    render_page_header(
-        "AI Search Console",
-        "Interact with the knowledge base through a cleaner chat surface and quick source access.",
-        kicker="Conversation"
-    )
+    render_app_shell("Chat")
     open_panel(tight=True)
     header = st.columns([0.8, 0.2], gap="small")
 
@@ -967,10 +1289,16 @@ def render_chat_page():
 
     # Display Messages
     for idx, message in enumerate(st.session_state.messages):
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-            if message["sources"]:
-                render_sources(message["sources"], context_key=f"{message['role']}_{idx}")
+        role = message.get("role", "assistant")
+        timestamp = format_chat_clock(message.get("timestamp"))
+        model_label = message.get("model_label") or get_active_model_label()
+        with st.chat_message(role):
+            render_chat_meta(role, timestamp, model_label=model_label)
+            st.markdown(message.get("content", ""))
+            if message.get("sources"):
+                render_sources(message["sources"], context_key=f"{role}_{idx}")
+
+    st.markdown('<div class="chat-input-hint">Ask a focused question for best retrieval quality.</div>', unsafe_allow_html=True)
 
     # User Input
     if prompt := st.chat_input("Ask a question..."):
@@ -982,24 +1310,39 @@ def render_chat_page():
         st.session_state.rate_limit_timestamps.append(time.time())
 
         # 1. Show User Message & Save to State/DB
-        st.chat_message("user").markdown(prompt)
-        st.session_state.messages.append({"role": "user", "content": prompt, "sources": []})
+        user_ts = time.time()
+        with st.chat_message("user"):
+            render_chat_meta("user", format_chat_clock(user_ts))
+            st.markdown(prompt)
+        st.session_state.messages.append({"role": "user", "content": prompt, "sources": [], "timestamp": user_ts})
         db.save_message(st.session_state.session_id, "user", prompt, user_id=st.session_state.user_id)
 
         # 2. Generate AI Answer
         with st.chat_message("assistant"):
+            st.markdown('<div class="chat-thinking">Thinking…</div>', unsafe_allow_html=True)
             try:
                 answer, sources = run_rag_with_status(prompt)
             except Exception as exc:
                 st.error(str(exc))
                 return
 
+            assistant_ts = time.time()
+            model_label = get_active_model_label()
+            render_chat_meta("assistant", format_chat_clock(assistant_ts), model_label=model_label)
             st.markdown(answer)
             if sources:
                 render_sources(sources, context_key=f"live_{len(st.session_state.messages)}")
 
             # Save Assistant Response
-            st.session_state.messages.append({"role": "assistant", "content": answer, "sources": sources})
+            st.session_state.messages.append(
+                {
+                    "role": "assistant",
+                    "content": answer,
+                    "sources": sources,
+                    "timestamp": assistant_ts,
+                    "model_label": model_label,
+                }
+            )
             db.save_message(st.session_state.session_id, "assistant", answer, sources,
                             user_id=st.session_state.user_id)
 
@@ -1011,22 +1354,25 @@ def render_chat_page():
 
             st.rerun()
     close_panel()
+    close_app_shell()
 
 
 def render_admin_home():
-    st.markdown('<div class="admin-shell">', unsafe_allow_html=True)
-    render_admin_pill("Admin Workspace")
-    render_page_header(
-        "Admin Home",
-        "Monitor the platform, jump to critical controls, and keep the knowledge base healthy.",
-        kicker="Operations"
-    )
+    render_app_shell("Admin Home")
     counts = db.get_system_counts()
+    st.markdown('<div class="stats-row">', unsafe_allow_html=True)
     col1, col2, col3, col4 = st.columns(4)
     render_stat_card(col1, "Users", counts["users"], "Registered accounts")
     render_stat_card(col2, "Admins", counts["admins"], "Privileged operators")
     render_stat_card(col3, "Sessions", counts["sessions"], "Tracked conversations")
     render_stat_card(col4, "Messages", counts["messages"], "Stored exchanges")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    render_card(
+        "Operations Focus",
+        "Use quick actions to jump into user management, chat governance, and knowledge base maintenance.",
+        footer="Tip: review knowledge base status before triggering refreshes."
+    )
 
     open_panel("Quick Actions")
     render_admin_panel_note("Use these shortcuts to jump directly into common admin operations.")
@@ -1052,17 +1398,11 @@ def render_admin_home():
     except Exception as exc:
         st.caption(f"Raw file count unavailable: {exc}")
     close_panel()
-    st.markdown('</div>', unsafe_allow_html=True)
+    close_app_shell()
 
 
 def render_admin_users():
-    st.markdown('<div class="admin-shell">', unsafe_allow_html=True)
-    render_admin_pill("Identity & Access")
-    render_page_header(
-        "Admin Users",
-        "Create accounts, assign roles, and handle access management without touching application logic.",
-        kicker="Identity"
-    )
+    render_app_shell("Admin Users")
     users = db.list_users()
     open_panel("User Directory")
     render_admin_panel_note("Review account ownership and role distribution before applying security changes.")
@@ -1101,6 +1441,7 @@ def render_admin_users():
     close_panel()
 
     if not users:
+        close_app_shell()
         return
 
     user_map = {f"{u[1]} (id {u[0]}, {u[2]})": u[0] for u in users}
@@ -1159,17 +1500,11 @@ def render_admin_users():
             db.delete_user(target_id)
             st.success("User deleted.")
     close_panel()
-    st.markdown('</div>', unsafe_allow_html=True)
+    close_app_shell()
 
 
 def render_admin_chats():
-    st.markdown('<div class="admin-shell">', unsafe_allow_html=True)
-    render_admin_pill("Conversation Governance")
-    render_page_header(
-        "Admin Chats",
-        "Audit conversation history, filter by owner, and remove sessions when required.",
-        kicker="Conversation Ops"
-    )
+    render_app_shell("Admin Chats")
     users = db.list_users()
     open_panel("Chat Sessions")
     render_admin_panel_note("Filter, inspect, and remove sessions to keep workspace data clean.")
@@ -1212,17 +1547,11 @@ def render_admin_chats():
     else:
         st.info("No sessions found.")
     close_panel()
-    st.markdown('</div>', unsafe_allow_html=True)
+    close_app_shell()
 
 
 def render_admin_knowledge_base():
-    st.markdown('<div class="admin-shell">', unsafe_allow_html=True)
-    render_admin_pill("Knowledge Operations")
-    render_page_header(
-        "Admin Knowledge Base",
-        "Configure retrieval, manage crawler folders, upload source files, and trigger refreshes.",
-        kicker="Index Management"
-    )
+    render_app_shell("Admin Knowledge Base")
 
     settings = settings_manager.load_settings()
     rag_settings = settings.get("rag", {})
@@ -1385,23 +1714,19 @@ def render_admin_knowledge_base():
     else:
         st.info("No raw files found.")
     close_panel()
-    st.markdown('</div>', unsafe_allow_html=True)
+    close_app_shell()
 
 
 def render_admin_usage():
-    st.markdown('<div class="admin-shell">', unsafe_allow_html=True)
-    render_admin_pill("Platform Analytics")
-    render_page_header(
-        "Admin Usage",
-        "Track adoption across users and get a high-level view of session and message volume.",
-        kicker="Analytics"
-    )
+    render_app_shell("Admin Usage")
     rows = db.get_usage_by_user()
     total_sessions = sum(row[3] for row in rows)
     total_messages = sum(row[4] for row in rows)
+    st.markdown('<div class="stats-row">', unsafe_allow_html=True)
     col1, col2 = st.columns(2)
     render_stat_card(col1, "Total Sessions", total_sessions, "Across all users")
     render_stat_card(col2, "Total Messages", total_messages, "Conversation volume")
+    st.markdown('</div>', unsafe_allow_html=True)
 
     open_panel("Usage by User")
     render_admin_panel_note("Track engagement and activity by user to detect trends and anomalies.")
@@ -1420,7 +1745,7 @@ def render_admin_usage():
     else:
         st.info("No usage data available.")
     close_panel()
-    st.markdown('</div>', unsafe_allow_html=True)
+    close_app_shell()
 
 
 # --- SIDEBAR ---
@@ -1451,7 +1776,7 @@ with st.sidebar:
             new_chat()
             st.rerun()
 
-        st.markdown("---")
+        render_separator()
 
         sessions = db.get_sessions(st.session_state.user_id)
         for s_id, s_title, s_time in sessions:
@@ -1466,7 +1791,7 @@ with st.sidebar:
                 load_chat(s_id)
                 st.rerun()
 
-        st.divider()
+        render_separator()
 
     render_system_pill(os.path.exists(PROCESSED_PATH) and os.path.exists(PROCESSED_DB_PATH))
 

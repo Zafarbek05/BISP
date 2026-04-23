@@ -30,7 +30,7 @@ This project is a desktop-native, **privacy-first semantic search engine** desig
 
 1. **Clone the repository:**
    ```bash
-   git clone [https://github.com/yourusername/ai-semantic-search.git](https://github.com/yourusername/ai-semantic-search.git)
+   git clone https://github.com/Zafarbek05/BISP.git
    cd ai-semantic-search
    
 2. **Install dependencies:**
@@ -38,10 +38,10 @@ This project is a desktop-native, **privacy-first semantic search engine** desig
    pip install -r requirements.txt
    
 3. **Configure the Environment:**
-    ```bash
-   OPENAI_API_KEY=your_api_key_here
-    LOCAL_MODEL_PATH=./models/llama3-8b
-    WATCHDOG_DIRECTORY=C:/Users/YourName/Documents
+   ```bash
+      OPENAI_API_KEY=your_api
+       LOCAL_MODEL_PATH=./models/llama3-8b
+       WATCHDOG_DIRECTORY=C:/Users/YourName/Documents
    
 4. **Launch the Application:**
     ```bash
