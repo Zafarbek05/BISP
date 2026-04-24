@@ -1,9 +1,11 @@
 import os
 import sys
 import time
+import json
 import shutil
 import subprocess
 import urllib.request
+import urllib.error
 from urllib.parse import urlparse
 
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
@@ -14,6 +16,13 @@ def _build_version_url(ollama_url: str | None) -> str:
     if not base:
         base = DEFAULT_OLLAMA_URL
     return f"{base.rstrip('/')}/api/version"
+
+
+def _build_tags_url(ollama_url: str | None) -> str:
+    base = (ollama_url or DEFAULT_OLLAMA_URL).strip()
+    if not base:
+        base = DEFAULT_OLLAMA_URL
+    return f"{base.rstrip('/')}/api/tags"
 
 
 def _build_ollama_host_env(ollama_url: str | None) -> str | None:
@@ -117,3 +126,39 @@ def stop_ollama_server(
     if errors:
         return False, "Failed to stop Ollama. " + "; ".join(errors)
     return False, "Ollama is still running. Stop it manually if needed."
+
+
+def list_local_models(ollama_url: str | None = None, timeout: float = 2.5) -> tuple[list[str], str | None]:
+    url = _build_tags_url(ollama_url)
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            body = response.read().decode("utf-8")
+    except urllib.error.URLError as exc:
+        reason = getattr(exc, "reason", None)
+        reason_text = str(reason or exc).lower()
+        if "10061" in reason_text or "refused" in reason_text:
+            return [], (
+                "Could not connect to Ollama. Please make sure Ollama is running, "
+                "then try refreshing local models."
+            )
+        return [], "Could not load local models from Ollama right now. Please try again."
+    except Exception as exc:
+        return [], "Could not load local models from Ollama right now. Please try again."
+
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return [], "Ollama returned an unexpected response while loading local models."
+
+    models = payload.get("models") or []
+    names = []
+    seen = set()
+    for model in models:
+        if not isinstance(model, dict):
+            continue
+        name = (model.get("name") or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        names.append(name)
+    return names, None

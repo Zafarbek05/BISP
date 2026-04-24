@@ -1,5 +1,6 @@
 import mimetypes
 import os
+import re
 import subprocess
 import sys
 import time
@@ -231,12 +232,46 @@ def render_chat_sidebar_section():
 
 
 def render_chat_messages():
+    def _strip_source_markers(text):
+        if not text:
+            return text
+        cleaned_lines = []
+        for line in text.splitlines():
+            if re.search(r"SOURCE FILE\s*:", line, flags=re.IGNORECASE):
+                continue
+            cleaned_lines.append(line)
+        return "\n".join(cleaned_lines).strip()
+
+    def _resolve_source_path(sources):
+        if not sources:
+            return None
+        for source in sources:
+            if not source:
+                continue
+            candidate = os.path.abspath(str(source))
+            if os.path.exists(candidate):
+                return candidate
+        return None
+
     for message in st.session_state.messages:
         role = message.get("role", "assistant")
         with st.chat_message(role):
             meta = get_active_model_label() if role == "assistant" else "You"
             st.markdown(f"<div class=\"chat-meta\">{escape(meta)}</div>", unsafe_allow_html=True)
-            st.markdown(message.get("content", ""))
+            content = message.get("content", "")
+            st.markdown(_strip_source_markers(content))
+
+            if role == "assistant":
+                source_path = _resolve_source_path(message.get("sources", []))
+                if source_path:
+                    folder_path = os.path.dirname(source_path)
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("Open source folder", key=f"open_folder_{message.get('timestamp', id(message))}"):
+                            open_in_explorer(folder_path)
+                    with col2:
+                        if st.button("Open source file", key=f"open_file_{message.get('timestamp', id(message))}"):
+                            open_in_explorer(source_path)
 
 
 def validate_upload(filename, file_bytes):
@@ -263,6 +298,6 @@ def open_in_explorer(path):
             if os.path.isdir(target):
                 subprocess.Popen(["explorer", target])
             else:
-                subprocess.Popen(["explorer", "/select,", target])
+                os.startfile(target)
     except Exception as exc:
         st.error(f"Failed to open folder: {exc}")

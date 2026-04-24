@@ -23,9 +23,14 @@ PROCESSED_DATA_DIR = os.path.join(BASE_DIR, "data", "processed")
 api_key = os.getenv("GEMINI_API_KEY")
 
 # --- INITIALIZATION ---
-DEFAULT_CLOUD_MODEL = "gemma3:1b"
+DEFAULT_CLOUD_MODEL = "gemini-2.5-flash"
 DEFAULT_LOCAL_MODEL = "gemma2:2b"
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
+SUPPORTED_CLOUD_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-pro",
+]
 
 # 1. Setup Embedding Model
 model_embed = None
@@ -56,7 +61,9 @@ def get_rag_settings():
     if engine not in {"cloud", "local"}:
         engine = "cloud"
 
-    cloud_model = rag_settings.get("cloud_model") or DEFAULT_CLOUD_MODEL
+    cloud_model = (rag_settings.get("cloud_model") or DEFAULT_CLOUD_MODEL).strip()
+    if cloud_model not in SUPPORTED_CLOUD_MODELS:
+        cloud_model = DEFAULT_CLOUD_MODEL
     local_model = rag_settings.get("local_model") or DEFAULT_LOCAL_MODEL
     ollama_url = rag_settings.get("ollama_url") or DEFAULT_OLLAMA_URL
     return engine, cloud_model, local_model, ollama_url
@@ -218,7 +225,19 @@ def ask_rag(query):
     if engine == "local":
         answer = generate_with_ollama(prompt, system_instr, local_model, ollama_url)
     else:
-        answer = generate_with_gemini(prompt, system_instr, cloud_model)
+        try:
+            answer = generate_with_gemini(prompt, system_instr, cloud_model)
+        except Exception as exc:
+            # Fallback to stable free-tier default when configured cloud model is invalid/unavailable.
+            if cloud_model != DEFAULT_CLOUD_MODEL:
+                try:
+                    answer = generate_with_gemini(prompt, system_instr, DEFAULT_CLOUD_MODEL)
+                except Exception:
+                    raise RuntimeError(
+                        f"Cloud model '{cloud_model}' failed and fallback '{DEFAULT_CLOUD_MODEL}' also failed: {exc}"
+                    ) from exc
+            else:
+                raise
     return answer, source_list
 
 
