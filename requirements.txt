@@ -1,0 +1,14 @@
+numpy==2.4.4
+protobuf==7.34.1
+pypdf==6.10.2
+python-dotenv==1.2.2
+python_bcrypt==0.3.2
+python_magic==0.4.27
+sentence_transformers==5.4.1
+sqlcipher3==0.6.2
+streamlit==1.56.0
+watchdog==6.0.0
+torchvision
+pywebview
+python-docx
+google-genai
