@@ -4,12 +4,14 @@ import ctypes
 from ctypes import wintypes
 
 import streamlit as st
+from streamlit_lottie import st_lottie
 
 import src.chat_storage as db
 import src.ollama_manager as ollama_manager
 import src.pipeline as pipeline
 import src.rag_final_answer as rag_final_answer
 import src.settings_manager as settings_manager
+from src.ui_utils import LOTTIE_SCANNING_URL, load_lottieurl
 from src.ui_core import (
     RAW_DATA_DIR,
     apply_theme,
@@ -268,159 +270,280 @@ class _StreamlitLogWriter:
     def flush(self):
         return
 
-st.subheader("Create User")
-with st.form("manage_create_user"):
-    new_username = st.text_input("Username")
-    new_password = st.text_input("Password", type="password")
-    new_role = st.selectbox("Role", ["user", "admin"], index=0)
-    create_submit = st.form_submit_button("Create user")
-if create_submit:
-    if not new_username or not new_password:
-        st.error("Username and password are required.")
-    else:
+with st.container():
+    st.markdown('<div class="stCard">', unsafe_allow_html=True)
+    st.subheader("Create User")
+    with st.form("manage_create_user"):
+        new_username = st.text_input("Username")
+        new_password = st.text_input("Password", type="password")
+        new_role = st.selectbox("Role", ["user", "admin"], index=0)
+        create_submit = st.form_submit_button("Create user")
+    if create_submit:
+        if not new_username or not new_password:
+            st.error("Username and password are required.")
+        else:
+            try:
+                db.create_user(new_username, new_password, role=new_role)
+                st.success("User created.")
+            except Exception as exc:
+                st.error(str(exc))
+    st.markdown("</div>", unsafe_allow_html=True)
+
+with st.container():
+    st.markdown('<div class="stCard">', unsafe_allow_html=True)
+    st.subheader("Update Role")
+    with st.form("manage_update_role"):
+        selected_label = st.selectbox("User", list(user_map.keys())) if user_map else None
+        selected_role = st.selectbox("New role", ["user", "admin"], index=0)
+        role_submit = st.form_submit_button("Update role")
+    if role_submit and selected_label:
         try:
-            db.create_user(new_username, new_password, role=new_role)
-            st.success("User created.")
+            db.update_user_role(user_map[selected_label], selected_role)
+            st.success("Role updated.")
         except Exception as exc:
             st.error(str(exc))
+    st.markdown("</div>", unsafe_allow_html=True)
 
-st.subheader("Update Role")
-with st.form("manage_update_role"):
-    selected_label = st.selectbox("User", list(user_map.keys())) if user_map else None
-    selected_role = st.selectbox("New role", ["user", "admin"], index=0)
-    role_submit = st.form_submit_button("Update role")
-if role_submit and selected_label:
-    try:
-        db.update_user_role(user_map[selected_label], selected_role)
-        st.success("Role updated.")
-    except Exception as exc:
-        st.error(str(exc))
+with st.container():
+    st.markdown('<div class="stCard">', unsafe_allow_html=True)
+    st.subheader("Engine Management")
+    settings = settings_manager.load_settings()
+    rag_settings = settings.get("rag", {})
+    engine = (rag_settings.get("engine") or "cloud").strip().lower()
+    if engine not in {"cloud", "local"}:
+        engine = "cloud"
 
-st.subheader("Engine Management")
-settings = settings_manager.load_settings()
-rag_settings = settings.get("rag", {})
-engine = (rag_settings.get("engine") or "cloud").strip().lower()
-if engine not in {"cloud", "local"}:
-    engine = "cloud"
+    saved_cloud_model = rag_settings.get("cloud_model") or rag_final_answer.DEFAULT_CLOUD_MODEL
+    saved_local_model = rag_settings.get("local_model") or rag_final_answer.DEFAULT_LOCAL_MODEL
+    ollama_url = rag_settings.get("ollama_url") or rag_final_answer.DEFAULT_OLLAMA_URL
 
-saved_cloud_model = rag_settings.get("cloud_model") or rag_final_answer.DEFAULT_CLOUD_MODEL
-saved_local_model = rag_settings.get("local_model") or rag_final_answer.DEFAULT_LOCAL_MODEL
-ollama_url = rag_settings.get("ollama_url") or rag_final_answer.DEFAULT_OLLAMA_URL
-
-selected_engine = st.selectbox(
-    "Reasoning mode",
-    ["cloud", "local"],
-    index=0 if engine == "cloud" else 1,
-)
-
-available_cloud_models = [
-    *rag_final_answer.SUPPORTED_CLOUD_MODELS,
-    rag_final_answer.DEFAULT_CLOUD_MODEL,
-]
-available_cloud_models = list(dict.fromkeys(available_cloud_models))
-
-if selected_engine == "cloud":
-    if saved_cloud_model not in available_cloud_models:
-        available_cloud_models.insert(0, saved_cloud_model)
-    selected_model = st.selectbox(
-        "Cloud model",
-        available_cloud_models,
-        index=available_cloud_models.index(saved_cloud_model),
+    selected_engine = st.selectbox(
+        "Reasoning mode",
+        ["cloud", "local"],
+        index=0 if engine == "cloud" else 1,
+        key="ui_reasoning_mode",
     )
-else:
-    live_local_models, local_error = ollama_manager.list_local_models(ollama_url)
-    local_models = list(live_local_models)
-    if saved_local_model and saved_local_model not in local_models:
-        local_models.insert(0, saved_local_model)
-    if rag_final_answer.DEFAULT_LOCAL_MODEL not in local_models:
-        local_models.append(rag_final_answer.DEFAULT_LOCAL_MODEL)
 
-    if local_models:
+    prev_engine = st.session_state.get("ui_prev_reasoning_mode", engine)
+    st.session_state["ui_prev_reasoning_mode"] = selected_engine
+
+    available_cloud_models = [
+        *rag_final_answer.SUPPORTED_CLOUD_MODELS,
+        rag_final_answer.DEFAULT_CLOUD_MODEL,
+    ]
+    available_cloud_models = list(dict.fromkeys(available_cloud_models))
+
+    if selected_engine == "cloud":
+        if saved_cloud_model not in available_cloud_models:
+            available_cloud_models.insert(0, saved_cloud_model)
         selected_model = st.selectbox(
-            "Local model",
-            local_models,
-            index=local_models.index(saved_local_model) if saved_local_model in local_models else 0,
+            "Cloud model",
+            available_cloud_models,
+            index=available_cloud_models.index(saved_cloud_model),
         )
-        if local_error and not live_local_models:
-            st.warning(local_error)
     else:
-        selected_model = saved_local_model
-        st.warning(local_error or "No local Ollama models found.")
-        selected_model = st.text_input("Local model (manual)", value=saved_local_model)
+        if prev_engine != "local":
+            with st.spinner("Starting Ollama..."):
+                ok, msg = ollama_manager.ensure_ollama_running(ollama_url)
+            (st.success if ok else st.error)(msg)
+            if ok:
+                st.rerun()
 
-if st.button("Save engine settings"):
-    patch = {"rag": {"engine": selected_engine}}
-    if selected_engine == "local":
-        patch["rag"]["local_model"] = selected_model
-        ok, msg = ollama_manager.ensure_ollama_running(ollama_url)
-        (st.success if ok else st.error)(msg)
-    else:
-        patch["rag"]["cloud_model"] = selected_model
-        ok, msg = ollama_manager.stop_ollama_server(ollama_url)
-        (st.success if ok else st.error)(msg)
-    settings_manager.update_settings(patch)
-    st.success(f"Saved {selected_engine} reasoning with model: {selected_model}")
+        live_local_models, local_error = ollama_manager.list_local_models(ollama_url)
+        local_models = list(live_local_models)
+        if saved_local_model and saved_local_model not in local_models:
+            local_models.insert(0, saved_local_model)
+        if rag_final_answer.DEFAULT_LOCAL_MODEL not in local_models:
+            local_models.append(rag_final_answer.DEFAULT_LOCAL_MODEL)
 
-st.subheader("Knowledge Base Management")
-effective_folders = settings_manager.get_effective_crawler_folders(settings, RAW_DATA_DIR)
-st.write("Current effective folder(s):")
-st.code("\n".join(effective_folders))
-
-if "kb_selected_folders" not in st.session_state:
-    st.session_state["kb_selected_folders"] = effective_folders or []
-
-if st.button("Select folders"):
-    picked, picker_error = select_folders_with_tk(
-        initial_dir=st.session_state["kb_selected_folders"][0] if st.session_state["kb_selected_folders"] else RAW_DATA_DIR
-    )
-    if picker_error:
-        st.error(picker_error)
-    elif picked:
-        st.session_state["kb_selected_folders"] = picked
-        st.success(f"Selected {len(picked)} folder(s). Click save to apply.")
-    else:
-        st.warning("No folders selected. Tip: keep selecting folders; click Cancel when done.")
-
-selected_folders = st.session_state.get("kb_selected_folders", [])
-if selected_folders:
-    st.write("Pending selection:")
-    st.code("\n".join(selected_folders))
-
-if st.button("Save and process"):
-    settings_manager.update_settings({"crawler": {"folders": selected_folders}})
-    st.info(f"Knowledge base folders saved ({len(selected_folders)}). Starting pipeline...")
-    log_placeholder = st.empty()
-    log_writer = _StreamlitLogWriter(log_placeholder)
-    with st.status("Processing selected folders...", expanded=True) as status:
-        status.write("Updating crawler settings")
-        original_stdout = sys.stdout
-        try:
-            sys.stdout = log_writer
-            status.write("Running crawler and vector builder")
-            ok, error = pipeline.run_pipeline("manual from manage")
-        finally:
-            sys.stdout = original_stdout
-
-        if ok:
-            status.update(label="Pipeline completed", state="complete")
-            st.success("Pipeline finished successfully. New folders are now processed.")
+        if local_models:
+            selected_model = st.selectbox(
+                "Local model",
+                local_models,
+                index=local_models.index(saved_local_model) if saved_local_model in local_models else 0,
+            )
+            if local_error and not live_local_models:
+                st.warning(local_error)
         else:
-            status.update(label="Pipeline failed", state="error")
-            st.error(f"Pipeline failed: {error}")
+            selected_model = saved_local_model
+            st.warning(local_error or "No local Ollama models found.")
+            selected_model = st.text_input("Local model (manual)", value=saved_local_model)
 
-st.subheader("Upload Files")
-uploaded_files = st.file_uploader("Upload documents", accept_multiple_files=True)
-if uploaded_files:
-    saved_count = 0
-    for uploaded_file in uploaded_files:
-        file_bytes = uploaded_file.getvalue()
-        is_valid, detail = validate_upload(uploaded_file.name, file_bytes)
-        if not is_valid:
-            st.error(f"{uploaded_file.name}: {detail}")
-            continue
-        os.makedirs(RAW_DATA_DIR, exist_ok=True)
-        with open(os.path.join(RAW_DATA_DIR, uploaded_file.name), "wb") as target:
-            target.write(file_bytes)
-        saved_count += 1
-    if saved_count:
-        st.success(f"Uploaded {saved_count} file(s).")
+    if st.button("Save engine settings"):
+        patch = {"rag": {"engine": selected_engine}}
+        if selected_engine == "local":
+            patch["rag"]["local_model"] = selected_model
+            ok, msg = ollama_manager.ensure_ollama_running(ollama_url)
+            (st.success if ok else st.error)(msg)
+        else:
+            patch["rag"]["cloud_model"] = selected_model
+            ok, msg = ollama_manager.stop_ollama_server(ollama_url)
+            (st.success if ok else st.error)(msg)
+        settings_manager.update_settings(patch)
+        st.success(f"Saved {selected_engine} reasoning with model: {selected_model}")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+with st.container():
+    st.markdown('<div class="stCard">', unsafe_allow_html=True)
+    st.subheader("Knowledge Base Management")
+    effective_folders = settings_manager.get_effective_crawler_folders(settings, RAW_DATA_DIR)
+    st.write("Current effective folder(s):")
+    st.code("\n".join(effective_folders))
+
+    if "kb_selected_folders" not in st.session_state:
+        st.session_state["kb_selected_folders"] = effective_folders or []
+
+    if st.button("Select folders"):
+        picked, picker_error = select_folders_with_tk(
+            initial_dir=st.session_state["kb_selected_folders"][0]
+            if st.session_state["kb_selected_folders"]
+            else RAW_DATA_DIR
+        )
+        if picker_error:
+            st.error(picker_error)
+        elif picked:
+            st.session_state["kb_selected_folders"] = picked
+            st.success(f"Selected {len(picked)} folder(s). Click save to apply.")
+        else:
+            st.warning("No folders selected. Tip: keep selecting folders; click Cancel when done.")
+
+    selected_folders = st.session_state.get("kb_selected_folders", [])
+    if selected_folders:
+        st.write("Pending selection:")
+        st.code("\n".join(selected_folders))
+
+    if st.button("Save and process"):
+        settings_manager.update_settings({"crawler": {"folders": selected_folders}})
+        st.info(f"Knowledge base folders saved ({len(selected_folders)}). Starting pipeline...")
+        log_placeholder = st.empty()
+        log_writer = _StreamlitLogWriter(log_placeholder)
+        with st.status("Processing selected folders...", expanded=True) as status:
+            animation_json = load_lottieurl(LOTTIE_SCANNING_URL)
+            if animation_json:
+                st_lottie(animation_json, height=150, key="loading")
+            status.write("Updating crawler settings")
+            original_stdout = sys.stdout
+            try:
+                sys.stdout = log_writer
+                status.write("Running crawler and vector builder")
+                ok, error = pipeline.run_pipeline("manual from manage")
+            finally:
+                sys.stdout = original_stdout
+
+            if ok:
+                status.update(label="Pipeline completed", state="complete")
+                st.success("Pipeline finished successfully. New folders are now processed.")
+            else:
+                status.update(label="Pipeline failed", state="error")
+                st.error(f"Pipeline failed: {error}")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+with st.container():
+    st.markdown('<div class="stCard">', unsafe_allow_html=True)
+    st.subheader("Upload Files")
+    uploaded_files = st.file_uploader("Upload documents", accept_multiple_files=True)
+    if uploaded_files:
+        saved_count = 0
+        for uploaded_file in uploaded_files:
+            file_bytes = uploaded_file.getvalue()
+            is_valid, detail = validate_upload(uploaded_file.name, file_bytes)
+            if not is_valid:
+                st.error(f"{uploaded_file.name}: {detail}")
+                continue
+            os.makedirs(RAW_DATA_DIR, exist_ok=True)
+            with open(os.path.join(RAW_DATA_DIR, uploaded_file.name), "wb") as target:
+                target.write(file_bytes)
+            saved_count += 1
+        if saved_count:
+            st.success(f"Uploaded {saved_count} file(s).")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+with st.container():
+    st.markdown('<div class="stCard">', unsafe_allow_html=True)
+    st.subheader("Session Management")
+
+    admin_user_options = {"All users": None}
+    admin_user_options.update({f"{u[1]} (id {u[0]}, {u[2]})": u[0] for u in users})
+    selected_user_label = st.selectbox("Filter sessions by user", list(admin_user_options.keys()))
+    selected_user_id = admin_user_options[selected_user_label]
+
+    all_sessions = db.list_sessions_admin(selected_user_id)
+    if not all_sessions:
+        st.info("No sessions found for the current filter.")
+        st.markdown("</div>", unsafe_allow_html=True)
+    else:
+        session_rows = [
+            {
+                "session_id": row[0],
+                "title": row[1] or "Untitled",
+                "created_at": row[2],
+                "user_id": row[3],
+                "username": row[4],
+                "messages": row[5],
+            }
+            for row in all_sessions
+        ]
+        st.dataframe(
+            session_rows,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "session_id": "Session ID",
+                "title": "Title",
+                "created_at": "Created",
+                "user_id": "User ID",
+                "username": "Username",
+                "messages": "Messages",
+            },
+        )
+
+        selected_session_id = st.selectbox(
+            "Inspect a session",
+            options=[row["session_id"] for row in session_rows],
+            format_func=lambda s_id: next(
+                (
+                    f"#{row['session_id']} | {row['username']} | {row['title']} ({row['messages']} messages)"
+                    for row in session_rows
+                    if row["session_id"] == s_id
+                ),
+                str(s_id),
+            ),
+        )
+        selected_session = next(
+            (row for row in session_rows if row["session_id"] == selected_session_id),
+            None,
+        )
+
+        if selected_session:
+            st.caption(
+                f"Session #{selected_session['session_id']} by {selected_session['username']} "
+                f"(created {selected_session['created_at']})"
+            )
+            session_messages = db.get_messages(selected_session_id, selected_session["user_id"])
+            if session_messages:
+                st.dataframe(
+                    [
+                        {
+                            "role": msg.get("role"),
+                            "content_preview": (msg.get("content") or "")[:220],
+                            "sources_count": len(msg.get("sources") or []),
+                        }
+                        for msg in session_messages
+                    ],
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "role": "Role",
+                        "content_preview": "Content Preview",
+                        "sources_count": "Sources",
+                    },
+                )
+            else:
+                st.info("This session has no messages.")
+
+            if st.button("Delete selected session", type="secondary"):
+                db.delete_session_admin(selected_session_id)
+                st.success(f"Session #{selected_session_id} deleted.")
+                st.rerun()
+
+    st.markdown("</div>", unsafe_allow_html=True)

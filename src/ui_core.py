@@ -7,12 +7,15 @@ import time
 from html import escape
 
 import streamlit as st
+from streamlit_lottie import st_lottie
+from streamlit_option_menu import option_menu
 
 import src.chat_storage as db
 import src.ollama_manager as ollama_manager
 import src.processed_storage as processed_storage
 import src.rag_final_answer as rag_final_answer
 import src.settings_manager as settings_manager
+from src.ui_utils import LOTTIE_SCANNING_URL, inject_custom_css, load_lottieurl
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RAW_DATA_DIR = os.path.join(BASE_DIR, "data", "raw")
@@ -32,6 +35,7 @@ def configure_page(title="Semantic Search Assistant"):
 
 
 def apply_theme():
+    inject_custom_css()
     st.markdown(
         """
         <style>
@@ -121,16 +125,30 @@ def render_sidebar(active="chat"):
         if st.button("Logout", use_container_width=True):
             logout()
 
-        st.markdown("<div class=\"section-title\">Navigation</div>", unsafe_allow_html=True)
         if st.session_state.get("role") == "admin":
-            if st.button("Dashboard", disabled=active == "dashboard", use_container_width=True):
-                st.switch_page("pages/dashboard.py")
-            if st.button("Manage", disabled=active == "manage", use_container_width=True):
-                st.switch_page("pages/manage.py")
-            if st.button("Chat", disabled=active == "chat", use_container_width=True):
-                st.switch_page("pages/chat.py")
-        else:
-            st.button("Chat", disabled=True, use_container_width=True)
+            st.markdown("<div class=\"section-title\">Navigation</div>", unsafe_allow_html=True)
+
+            nav_options = ["Dashboard", "Manage", "Chat"]
+            nav_icons = ["speedometer2", "folder-symlink", "chat-right-text"]
+            active_to_index = {"dashboard": 0, "manage": 1, "chat": 2}
+
+            selected = option_menu(
+                menu_title=None,
+                options=nav_options,
+                icons=nav_icons,
+                default_index=active_to_index.get(active, 0),
+                styles={"nav-link-selected": {"background-color": "#0077b6"}},
+            )
+
+            target_pages = {
+                "Dashboard": "pages/dashboard.py",
+                "Manage": "pages/manage.py",
+                "Chat": "pages/chat.py",
+            }
+            target_page = target_pages.get(selected)
+            current_page = target_pages.get(active.title())
+            if target_page and target_page != current_page:
+                st.switch_page(target_page)
 
 
 def _prune_rate_limit(now=None):
@@ -205,6 +223,9 @@ def get_active_model_label():
 
 def run_rag_with_status(prompt):
     with st.status("Working...", expanded=True) as status:
+        animation_json = load_lottieurl(LOTTIE_SCANNING_URL)
+        if animation_json:
+            st_lottie(animation_json, height=150, key="loading")
         if rag_final_answer.model_embed is None:
             status.write("Loading embedding model")
         rag_final_answer.get_embedder()
@@ -219,13 +240,17 @@ def run_rag_with_status(prompt):
 
 def render_chat_sidebar_section():
     st.markdown("<div class=\"section-title\">Chat History</div>", unsafe_allow_html=True)
-    if st.button("New Chat", use_container_width=True):
+    if st.button("New chat", use_container_width=True):
         new_chat()
         st.rerun()
     current_session_id = st.session_state.get("session_id")
-    for s_id, s_title, _ in db.get_sessions(st.session_state.user_id):
+    sessions = list(db.get_sessions(st.session_state.user_id))
+    for idx, (s_id, s_title, _) in enumerate(sessions):
         is_current = s_id == current_session_id
-        label = s_title if len(s_title) <= 28 else s_title[:26] + ".."
+        title = (s_title or "").strip()
+        if not title or title.lower() == "new chat":
+            title = f"Chat {idx + 1}"
+        label = title if len(title) <= 28 else title[:26] + ".."
         if st.button(label, key=f"session_{s_id}", disabled=is_current, use_container_width=True):
             load_chat(s_id)
             st.rerun()

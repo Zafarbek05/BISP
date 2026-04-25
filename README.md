@@ -15,9 +15,9 @@ This project is a desktop-native, **privacy-first semantic search engine** desig
 ## 🛠️ Tech Stack
 
 - **Backend:** Python 3.9+
-- **Frontend:** HTML5/CSS3/JS (via `pywebview`)
-- **Vector Database:** SQLite / ChromaDB (Local storage)
-- **LLM Support:** Llama 3 / Mistral (Local), GPT-4 / Claude (Cloud API)
+- **Frontend:** Streamlit (via `pywebview`)
+- **Vector Database:** SQLite
+- **LLM Support:** Ollama 3 (Local), Gemini (Cloud API)
 - **Automation:** Python Watchdog API
 
 ## 🚀 Getting Started
@@ -25,7 +25,8 @@ This project is a desktop-native, **privacy-first semantic search engine** desig
 ### Prerequisites
 
 - Python 3.9 or higher
-- (Optional) CUDA-enabled GPU for optimized local inference performance
+- Ollama for local reasoning
+- Gemini Cloud API keys for cloud reasoning
 
 ### Installation
 

@@ -1,8 +1,8 @@
 {
   "version": 1,
   "rag": {
-    "engine": "local",
-    "cloud_model": "gemma3:1b",
+    "engine": "cloud",
+    "cloud_model": "gemini-2.5-flash",
     "local_model": "gemma2:2b",
     "ollama_url": "http://localhost:11434"
   },
