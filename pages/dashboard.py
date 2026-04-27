@@ -6,6 +6,7 @@ import streamlit as st
 
 import src.chat_storage as db
 import src.processed_storage as processed_storage
+import src.settings_manager as settings_manager
 from src.ui_core import (
     PROCESSED_DB_PATH,
     PROCESSED_PATH,
@@ -370,25 +371,56 @@ with st.container():
 with st.container():
     st.markdown('<div class="stCard">', unsafe_allow_html=True)
     st.subheader("File and Folder Dashboard")
-    try:
-        raw_files = sorted([f for f in os.listdir(RAW_DATA_DIR) if os.path.isfile(os.path.join(RAW_DATA_DIR, f))])
-    except Exception as exc:
-        raw_files = []
-        st.warning(str(exc))
-
-    st.dataframe(
-        [
-            {
-                "raw_folder": RAW_DATA_DIR,
-                "total_files": len(raw_files),
-            }
-        ],
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    if raw_files:
-        st.dataframe([{"file": name} for name in raw_files], use_container_width=True, hide_index=True)
+    
+    settings = settings_manager.load_settings()
+    configured_folders = settings_manager.get_configured_crawler_folders(settings)
+    
+    # 1. Configured Source Folders (Admin Defined)
+    st.markdown("### Configured Source Folders")
+    if configured_folders:
+        for folder in configured_folders:
+            with st.expander(f"📁 {folder}", expanded=True):
+                try:
+                    items = sorted(os.listdir(folder))
+                    if items:
+                        item_data = []
+                        for item in items:
+                            full_path = os.path.join(folder, item)
+                            is_dir = os.path.isdir(full_path)
+                            item_data.append({
+                                "Name": item,
+                                "Type": "Folder" if is_dir else "File",
+                                "Size (KB)": round(os.path.getsize(full_path) / 1024, 2) if not is_dir else "-"
+                            })
+                        st.dataframe(item_data, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("Folder is empty.")
+                except Exception as e:
+                    st.error(f"Error reading folder: {e}")
     else:
-        st.info("No raw files found.")
+        st.info("No custom folders configured by admin.")
+
+    st.write("---")
+
+    # 2. Raw Source Folders (Default data/raw)
+    st.markdown("### Raw Source Folders")
+    try:
+        items = sorted(os.listdir(RAW_DATA_DIR))
+        with st.expander(f"📁 {RAW_DATA_DIR}", expanded=True):
+            if items:
+                item_data = []
+                for item in items:
+                    full_path = os.path.join(RAW_DATA_DIR, item)
+                    is_dir = os.path.isdir(full_path)
+                    item_data.append({
+                        "Name": item,
+                        "Type": "Folder" if is_dir else "File",
+                        "Size (KB)": round(os.path.getsize(full_path) / 1024, 2) if not is_dir else "-"
+                    })
+                st.dataframe(item_data, use_container_width=True, hide_index=True)
+            else:
+                st.info("No files or folders found in raw directory.")
+    except Exception as exc:
+        st.warning(f"Could not access raw directory: {exc}")
+        
     st.markdown("</div>", unsafe_allow_html=True)

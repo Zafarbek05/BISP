@@ -2,14 +2,14 @@
   "version": 1,
   "rag": {
     "engine": "cloud",
-    "cloud_model": "gemini-2.5-flash",
+    "cloud_model": "gemini-2.5-flash-lite",
     "local_model": "gemma2:2b",
     "ollama_url": "http://localhost:11434"
   },
   "crawler": {
     "folders": [
-      "C:\\Users\\Zafarbek\\Desktop\\masters prep\\sparck ai scholarship",
-      "C:\\Users\\Zafarbek\\Desktop\\23"
+      "C:\\Users\\Zafarbek\\Desktop\\24",
+      "C:\\Users\\Zafarbek\\Desktop\\masters prep\\sparck ai scholarship"
     ]
   },
   "pipeline": {
