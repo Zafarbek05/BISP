@@ -38,10 +38,19 @@ This project is a desktop-native, **privacy-first semantic search engine** desig
   ```bash
    pip install -r requirements.txt
   ```
-3. **Configure the API:**
-  ```bash
-   OPENAI_API_KEY=your_api
-  ```
+### Configuration (Environment Variables)
+
+- `GEMINI_API_KEY`: Required for Gemini Cloud API access.
+- `DB_KEY`: Key for SQLCipher database encryption.
+- `ADMIN_LOGIN` / `ADMIN_PASSWORD`: Credentials for the Admin Dashboard.
+
+#### Gemini Quota Monitoring
+The Gemini API usage is automatically tracked in the **Admin Dashboard**. It captures:
+- **RPM (Requests Per Minute)**: Automatically parsed from 429 errors or inferred from usage.
+- **Token Usage**: Captured from `usageMetadata` in successful responses.
+- **Historical Data**: View and export the last 30 days of usage as CSV or JSON.
+
+*Note: Real-time quota visibility depends on the Gemini API version and tier. If headers are missing, the dashboard will show "Usage data unavailable" for those specific metrics.*
 4. **Launch the Application:**
   ```bash
    streamlit run app.py

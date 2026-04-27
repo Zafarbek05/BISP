@@ -3,6 +3,7 @@ import argparse
 import json
 import urllib.request
 import urllib.error
+from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 from dotenv import load_dotenv, find_dotenv
 
@@ -12,9 +13,9 @@ try:
 except ImportError:
     import processed_storage as storage
 try:
-    from . import settings_manager as settings_manager
+    from . import chat_storage as storage_chat
 except ImportError:
-    import settings_manager as settings_manager
+    import chat_storage as storage_chat
 
 # --- SMART PATHING ---
 # Gets the 'src' folder, then goes up to the Project Root
@@ -40,17 +41,21 @@ genai_client = None
 db_path = storage.get_db_path()
 vectors_path = os.path.join(PROCESSED_DATA_DIR, "vector_storage.npy")
 
-data_cache = {
-    "chunks": None,
-    "vectors": None,
-    "db_mtime": None,
-    "vectors_mtime": None,
-    "db_size": None,
-    "vectors_size": None,
+data_cache: Dict[str, Any] = {
+    "chunks": [],
+    "vectors": np.array([]),
+    "db_mtime": 0.0,
+    "vectors_mtime": 0.0,
+    "db_size": 0,
+    "vectors_size": 0,
 }
 
 
 def get_rag_settings():
+    try:
+        from . import settings_manager
+    except ImportError:
+        import settings_manager
     try:
         settings = settings_manager.load_settings()
     except Exception:
@@ -104,7 +109,7 @@ def load_processed_data():
     db_size = os.path.getsize(db_path)
     vectors_size = os.path.getsize(vectors_path)
 
-    if (data_cache["chunks"] is not None
+    if (len(data_cache["chunks"]) > 0
             and data_cache["db_mtime"] == db_mtime
             and data_cache["vectors_mtime"] == vectors_mtime
             and data_cache["db_size"] == db_size
@@ -185,15 +190,54 @@ def generate_with_gemini(prompt, system_instr, model_name):
             "Google GenAI SDK is missing. Install dependency: pip install google-genai"
         ) from exc
 
-    response = client.models.generate_content(
-        model=model_name,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=system_instr,
-            temperature=0.1
+    try:
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instr,
+                temperature=0.1
+            )
         )
-    )
-    return response.text
+        
+        # Track usage
+        try:
+            usage = response.usage_metadata
+            if usage:
+                # We don't have real-time rate limits from headers in standard SDK,
+                # but we can track tokens consumed.
+                storage_chat.save_gemini_usage(
+                    model_name=model_name,
+                    quota_consumed=usage.total_token_count,
+                    input_tokens=usage.prompt_token_count,
+                    output_tokens=usage.candidates_token_count
+                )
+        except Exception as e:
+            print(f"Warning: Failed to save Gemini usage: {e}")
+
+        return response.text
+    except Exception as exc:
+        # Check if it's a rate limit error (429)
+        error_msg = str(exc).lower()
+        if "429" in error_msg or "resource_exhausted" in error_msg:
+            # Try to parse limits from error message if possible
+            # Example message: "limit: 15, model: gemini-2.0-flash"
+            import re
+            limit_rpm = None
+            if "limit:" in error_msg:
+                match = re.search(r"limit:\s*(\d+)", error_msg)
+                if match:
+                    limit_rpm = int(match.group(1))
+            
+            try:
+                storage_chat.save_gemini_usage(
+                    model_name=model_name,
+                    limit_rpm=limit_rpm,
+                    remaining_rpm=0 # Obviously 0 if we hit 429
+                )
+            except:
+                pass
+        raise exc
 
 
 def generate_with_ollama(prompt, system_instr, model_name, ollama_url):
@@ -228,14 +272,30 @@ def ask_rag(query):
         try:
             answer = generate_with_gemini(prompt, system_instr, cloud_model)
         except Exception as exc:
+            # Check if it's a rate limit or overloaded error (429 or 503)
+            error_msg = str(exc).lower()
+            friendly_msg = None
+            if "503" in error_msg or "overloaded" in error_msg or "service_unavailable" in error_msg:
+                friendly_msg = f"The model '{cloud_model}' is currently experiencing high demand and is temporarily unavailable (503). Please try again in a few moments or select another model in settings."
+            elif "429" in error_msg or "resource_exhausted" in error_msg:
+                friendly_msg = f"Rate limit reached for '{cloud_model}'. Please wait a moment before sending more requests."
+            
+            if friendly_msg:
+                raise RuntimeError(friendly_msg) from exc
+                
             # Fallback to stable free-tier default when configured cloud model is invalid/unavailable.
             if cloud_model != DEFAULT_CLOUD_MODEL:
                 try:
                     answer = generate_with_gemini(prompt, system_instr, DEFAULT_CLOUD_MODEL)
-                except Exception:
+                except Exception as fallback_exc:
+                    fallback_error_msg = str(fallback_exc).lower()
+                    if "503" in fallback_error_msg or "overloaded" in fallback_error_msg:
+                        raise RuntimeError(
+                            f"Both '{cloud_model}' and fallback '{DEFAULT_CLOUD_MODEL}' are experiencing high demand (503). Please try again later."
+                        ) from fallback_exc
                     raise RuntimeError(
                         f"Cloud model '{cloud_model}' failed and fallback '{DEFAULT_CLOUD_MODEL}' also failed: {exc}"
-                    ) from exc
+                    ) from fallback_exc
             else:
                 raise
     return answer, source_list

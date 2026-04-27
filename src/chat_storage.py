@@ -25,13 +25,18 @@ def _normalize_username(username: str) -> str:
 
 
 def _hash_password(password: str) -> str:
+    hasher = getattr(bcrypt, "hashpw", None)
+    if hasher is None:
+        # Fallback if bcrypt is broken or missing hashpw attribute
+        raise RuntimeError("bcrypt.hashpw is not available. Please reinstall bcrypt: pip install --force-reinstall bcrypt")
+
     salt = bcrypt.gensalt()
     try:
         salt_value = salt.encode("utf-8") if isinstance(salt, str) else salt
-        hashed = bcrypt.hashpw(password.encode("utf-8"), salt_value)
+        hashed = hasher(password.encode("utf-8"), salt_value)
     except TypeError:
         # Some bcrypt builds expect str instead of bytes.
-        hashed = bcrypt.hashpw(password, salt)
+        hashed = hasher(password, salt)
 
     return hashed.decode("utf-8") if isinstance(hashed, bytes) else hashed
 
@@ -45,11 +50,15 @@ def _check_password(password: str, password_hash: str) -> bool:
             # Some bcrypt builds expect str instead of bytes.
             return checker(password, password_hash)
 
+    hasher = getattr(bcrypt, "hashpw", None)
+    if hasher is None:
+        raise RuntimeError("bcrypt.hashpw and checkpw are not available.")
+
     try:
-        computed = bcrypt.hashpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+        computed = hasher(password.encode("utf-8"), password_hash.encode("utf-8"))
     except TypeError:
         # Some bcrypt builds expect str instead of bytes, or may not provide checkpw.
-        computed = bcrypt.hashpw(password, password_hash)
+        computed = hasher(password, password_hash)
 
     if isinstance(computed, bytes):
         computed = computed.decode("utf-8")
@@ -138,6 +147,33 @@ def init_db():
                      (
                          id
                      ))''')
+
+        # Table for Gemini Usage Tracking
+        c.execute('''CREATE TABLE IF NOT EXISTS gemini_usage
+                     (
+                         id INTEGER PRIMARY KEY AUTOINCREMENT,
+                         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                         limit_rpm INTEGER,
+                         remaining_rpm INTEGER,
+                         limit_tpm INTEGER,
+                         remaining_tpm INTEGER,
+                         limit_rpd INTEGER,
+                         remaining_rpd INTEGER,
+                         quota_total INTEGER,
+                         quota_consumed INTEGER,
+                         quota_remaining INTEGER,
+                         model_name TEXT,
+                         input_tokens INTEGER,
+                         output_tokens INTEGER
+                     )''')
+
+        # Ensure input_tokens and output_tokens columns exist for older DBs
+        c.execute("PRAGMA table_info(gemini_usage)")
+        usage_columns = [row[1] for row in c.fetchall()]
+        if "input_tokens" not in usage_columns:
+            c.execute("ALTER TABLE gemini_usage ADD COLUMN input_tokens INTEGER")
+        if "output_tokens" not in usage_columns:
+            c.execute("ALTER TABLE gemini_usage ADD COLUMN output_tokens INTEGER")
 
         conn.commit()
     except MemoryError as exc:
@@ -425,6 +461,131 @@ def get_system_counts():
     messages = c.fetchone()[0]
     conn.close()
     return {"users": users, "admins": admins, "sessions": sessions, "messages": messages}
+
+
+def save_gemini_usage(limit_rpm=None, remaining_rpm=None, limit_tpm=None, remaining_tpm=None,
+                      limit_rpd=None, remaining_rpd=None, quota_total=None, quota_consumed=None,
+                      quota_remaining=None, model_name=None, input_tokens=None, output_tokens=None):
+    """Saves Gemini API usage metrics."""
+    conn = _get_conn()
+    c = conn.cursor()
+    c.execute("""INSERT INTO gemini_usage 
+                 (limit_rpm, remaining_rpm, limit_tpm, remaining_tpm, limit_rpd, remaining_rpd, 
+                  quota_total, quota_consumed, quota_remaining, model_name, input_tokens, output_tokens)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+              (limit_rpm, remaining_rpm, limit_tpm, remaining_tpm, limit_rpd, remaining_rpd,
+               quota_total, quota_consumed, quota_remaining, model_name, input_tokens, output_tokens))
+    conn.commit()
+    conn.close()
+
+
+def get_gemini_usage_summary(days=1):
+    """Returns summarized Gemini usage for the specified number of days."""
+    try:
+        conn = _get_conn()
+        c = conn.cursor()
+        c.execute("""SELECT SUM(quota_consumed), MAX(limit_rpm), AVG(remaining_rpm), MAX(quota_total),
+                     SUM(input_tokens), SUM(output_tokens)
+                     FROM gemini_usage 
+                     WHERE timestamp >= date('now', ?)""", (f"-{days} days",))
+        row = c.fetchone()
+        conn.close()
+        if not row or row[0] is None:
+            return None
+        return {
+            "total_consumed": row[0],
+            "max_limit_rpm": row[1],
+            "avg_remaining_rpm": row[2],
+            "max_quota_total": row[3],
+            "total_input_tokens": row[4],
+            "total_output_tokens": row[5]
+        }
+    except Exception as e:
+        print(f"Error summarizing Gemini usage: {e}")
+        return None
+
+
+def get_latest_gemini_usage():
+    """Returns the most recent Gemini usage metrics."""
+    try:
+        conn = _get_conn()
+        c = conn.cursor()
+        c.execute("SELECT * FROM gemini_usage ORDER BY id DESC LIMIT 1")
+        row = c.fetchone()
+        conn.close()
+    except Exception as e:
+        print(f"Error fetching Gemini usage: {e}")
+        return None
+
+    if not row:
+        return None
+    
+    # Map row to dict (skipping id which is index 0)
+    return {
+        "timestamp": row[1],
+        "limit_rpm": row[2],
+        "remaining_rpm": row[3],
+        "limit_tpm": row[4],
+        "remaining_tpm": row[5],
+        "limit_rpd": row[6],
+        "remaining_rpd": row[7],
+        "quota_total": row[8],
+        "quota_consumed": row[9],
+        "quota_remaining": row[10],
+        "model_name": row[11],
+        "input_tokens": row[12],
+        "output_tokens": row[13]
+    }
+
+
+def get_gemini_usage_history(days=30, model_name=None):
+    """Returns historical Gemini usage metrics for the last N days, optionally filtered by model."""
+    conn = _get_conn()
+    c = conn.cursor()
+    query = "SELECT * FROM gemini_usage WHERE timestamp >= date('now', ?)"
+    params = [f"-{days} days"]
+    
+    if model_name:
+        query += " AND model_name = ?"
+        params.append(model_name)
+    
+    query += " ORDER BY timestamp ASC"
+    
+    c.execute(query, tuple(params))
+    rows = c.fetchall()
+    conn.close()
+    
+    history = []
+    for row in rows:
+        history.append({
+            "timestamp": row[1],
+            "limit_rpm": row[2],
+            "remaining_rpm": row[3],
+            "limit_tpm": row[4],
+            "remaining_tpm": row[5],
+            "limit_rpd": row[6],
+            "remaining_rpd": row[7],
+            "quota_total": row[8],
+            "quota_consumed": row[9],
+            "quota_remaining": row[10],
+            "model_name": row[11],
+            "input_tokens": row[12],
+            "output_tokens": row[13]
+        })
+    return history
+
+
+def get_available_models():
+    """Returns a list of models that have usage data recorded."""
+    try:
+        conn = _get_conn()
+        c = conn.cursor()
+        c.execute("SELECT DISTINCT model_name FROM gemini_usage WHERE model_name IS NOT NULL")
+        models = [row[0] for row in c.fetchall()]
+        conn.close()
+        return models
+    except Exception:
+        return []
 
 
 # Initialize DB on first run

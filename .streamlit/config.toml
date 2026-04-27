@@ -1,0 +1,6 @@
+[theme]
+primaryColor = "#0077b6"  # Fresh Ocean Blue
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f0f8ff" # Alice Blue (very light ocean tint)
+textColor = "#1e1e1e"
+font = "sans serif"
