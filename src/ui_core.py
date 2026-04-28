@@ -111,8 +111,7 @@ def show_login():
     """, unsafe_allow_html=True)
 
     with st.container():
-        st.markdown('<div class="login-container">', unsafe_allow_html=True)
-        st.markdown('<div class="login-header"><h2>Secure Access</h2><p>Choose your preferred login method</p></div>', unsafe_allow_html=True)
+        st.markdown('<div class="login-header"><h2>Sign In to the System</h2><p>Choose your preferred login method</p></div>', unsafe_allow_html=True)
 
         if db.get_user_count() == 0:
             st.info("No users found. Create the first admin account.")
@@ -140,7 +139,7 @@ def show_login():
         col1, divider, col3 = st.columns([1, 0.2, 1])
 
         with col1:
-            st.markdown("#### Local Privacy")
+            st.markdown("#### Local Sign-In")
             with st.form("local_login"):
                 username = st.text_input("Username")
                 password = st.text_input("Password", type="password")
@@ -178,7 +177,7 @@ def show_login():
             st.markdown('<div style="height: 100%; border-left: 1px solid #eee; margin: 0 auto; width: 1px;"></div>', unsafe_allow_html=True)
 
         with col3:
-            st.markdown("#### Social Convenience")
+            st.markdown("#### OAuth Sign-In")
             st.write("Fast and secure access using your Google account.")
             st.info("💡 First-time users will have an account created automatically.")
             if st.button("Continue with Google", type="primary", use_container_width=True):

@@ -1,31 +1,35 @@
+# --- Python / Streamlit App ---
 __pycache__/
 *.py[cod]
 *$py.class
-
-.streamlit/secrets.toml
-
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-*.egg-info/
-
-venv/
-env/
 .venv/
+venv/
 ENV/
-
 .env
-.venv
-*.env
+*.db
+*.log
 
-data/
+# --- PyInstaller / Desktop Build ---
+# We ignore these because they are generated binaries, not source code
+build/
+dist/
+*.spec
 
-importtime.txt
+# --- React / Next.js Landing Page ---
+landing/node_modules/
+landing/.next/
+landing/out/
+landing/build/
+.vercel
+*.tsbuildinfo
+
+# --- OS / IDE Specific ---
+.DS_Store
+.vscode/
+.idea/
+Thumbs.db
+.cursor
+data
+
+# --- streamlit secrets ---
+.streamlit/secrets.toml

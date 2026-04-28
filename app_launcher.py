@@ -71,7 +71,11 @@ def main() -> int:
         print(secrets.token_urlsafe(48))
         return 0
 
-    root_dir = os.path.dirname(os.path.abspath(__file__))
+    if hasattr(sys, '_MEIPASS'):
+        root_dir = sys._MEIPASS
+    else:
+        root_dir = os.path.dirname(os.path.abspath(__file__))
+
     pipeline_script = os.path.join(root_dir, "src", "pipeline.py")
     app_script = os.path.join(root_dir, "app.py")
 

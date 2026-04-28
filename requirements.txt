@@ -16,3 +16,4 @@ python-docx
 google-genai
 requests
 Authlib
+pyinstaller
