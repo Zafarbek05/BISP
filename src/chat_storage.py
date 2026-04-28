@@ -75,29 +75,32 @@ def init_db():
         # Table for Users
         c.execute('''CREATE TABLE IF NOT EXISTS users
                      (
-                         id
-                         INTEGER
-                         PRIMARY
-                         KEY
-                         AUTOINCREMENT,
-                         username
-                         TEXT
-                         UNIQUE
-                         NOT
-                         NULL,
-                         password_hash
-                         TEXT
-                         NOT
-                         NULL,
-                         role
-                         TEXT
-                         NOT
-                         NULL,
-                         created_at
-                         DATETIME
-                         DEFAULT
-                         CURRENT_TIMESTAMP
+                         id INTEGER PRIMARY KEY AUTOINCREMENT,
+                         username TEXT UNIQUE NOT NULL,
+                         email TEXT UNIQUE,
+                         password_hash TEXT,
+                         role TEXT NOT NULL,
+                         provider TEXT DEFAULT 'local',
+                         social_id TEXT,
+                         picture TEXT,
+                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                      )''')
+
+        # Migration: Ensure all columns exist for older DBs
+        c.execute("PRAGMA table_info(users)")
+        user_columns = [row[1] for row in c.fetchall()]
+        if "email" not in user_columns:
+            c.execute("ALTER TABLE users ADD COLUMN email TEXT")
+        if "provider" not in user_columns:
+            c.execute("ALTER TABLE users ADD COLUMN provider TEXT DEFAULT 'local'")
+        if "social_id" not in user_columns:
+            c.execute("ALTER TABLE users ADD COLUMN social_id TEXT")
+        if "picture" not in user_columns:
+            c.execute("ALTER TABLE users ADD COLUMN picture TEXT")
+        
+        # In some versions password_hash was NOT NULL, we might need to change that 
+        # but SQLite ALTER COLUMN is limited. We'll handle it via logic or future migration if needed.
+        # For now, local users will have it, social users won't.
 
         # Table for Chat Sessions
         c.execute('''CREATE TABLE IF NOT EXISTS sessions
@@ -214,20 +217,30 @@ def get_user_count():
     return count
 
 
-def create_user(username, password, role="user"):
-    if not username or not password:
-        raise ValueError("Username and password are required.")
+def create_user(username, password=None, role="user", email=None, provider='local', social_id=None):
+    if not username:
+        raise ValueError("Username is required.")
+    
+    # Use dummy password for social users to satisfy any future NOT NULL constraints
+    # though currently password_hash is nullable in our schema.
+    final_password_hash = None
+    if password:
+        final_password_hash = _hash_password(password)
+    elif provider != 'local':
+        final_password_hash = "EXTERNAL_SOCIAL_AUTH"
+
     role = role.strip().lower()
     if role not in {"admin", "user"}:
         raise ValueError("Invalid role.")
 
     normalized = _normalize_username(username)
-    password_hash = _hash_password(password)
 
     conn = _get_conn()
     c = conn.cursor()
-    c.execute("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
-              (normalized, password_hash, role))
+    c.execute(
+        "INSERT INTO users (username, email, password_hash, role, provider, social_id) VALUES (?, ?, ?, ?, ?, ?)",
+        (normalized, email, final_password_hash, role, provider, social_id)
+    )
     user_id = c.lastrowid
     conn.commit()
     conn.close()
@@ -238,12 +251,85 @@ def get_user_by_username(username):
     normalized = _normalize_username(username)
     conn = _get_conn()
     c = conn.cursor()
-    c.execute("SELECT id, username, password_hash, role FROM users WHERE username = ?", (normalized,))
+    c.execute("SELECT id, username, email, password_hash, role, provider, social_id, picture FROM users WHERE username = ?", (normalized,))
     row = c.fetchone()
     conn.close()
     if not row:
         return None
-    return {"id": row[0], "username": row[1], "password_hash": row[2], "role": row[3]}
+    return {
+        "id": row[0],
+        "username": row[1],
+        "email": row[2],
+        "password_hash": row[3],
+        "role": row[4],
+        "provider": row[5],
+        "social_id": row[6],
+        "picture": row[7]
+    }
+
+
+def get_user_by_email(email):
+    conn = _get_conn()
+    c = conn.cursor()
+    c.execute("SELECT id, username, email, password_hash, role, provider, social_id, picture FROM users WHERE email = ?", (email,))
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {
+        "id": row[0],
+        "username": row[1],
+        "email": row[2],
+        "password_hash": row[3],
+        "role": row[4],
+        "provider": row[5],
+        "social_id": row[6],
+        "picture": row[7]
+    }
+
+
+def upsert_social_user(email, username, social_id, picture=None, provider='google'):
+    """Creates or updates a social user profile for JIT provisioning."""
+    conn = _get_conn()
+    c = conn.cursor()
+    
+    # Check if user exists by email
+    c.execute("SELECT id, provider FROM users WHERE email = ?", (email,))
+    row = c.fetchone()
+    
+    if row:
+        # Identity Merging: Update existing record
+        user_id = row[0]
+        old_provider = row[1]
+        
+        # If it was local, it becomes hybrid
+        new_provider = 'hybrid' if old_provider == 'local' else provider
+        
+        c.execute(
+            "UPDATE users SET social_id = ?, picture = ?, provider = ? WHERE id = ?",
+            (social_id, picture, new_provider, user_id)
+        )
+    else:
+        # JIT Provisioning: Create new user
+        base_username = _normalize_username(username or email.split('@')[0])
+        final_username = base_username
+        counter = 1
+        while True:
+            c.execute("SELECT 1 FROM users WHERE username = ?", (final_username,))
+            if not c.fetchone():
+                break
+            final_username = f"{base_username}{counter}"
+            counter += 1
+            
+        c.execute(
+            "INSERT INTO users (username, email, social_id, picture, provider, role, password_hash) VALUES (?, ?, ?, ?, ?, 'user', 'EXTERNAL_SOCIAL_AUTH')",
+            (final_username, email, social_id, picture, provider)
+        )
+        user_id = c.lastrowid
+        
+    conn.commit()
+    conn.close()
+    return user_id
 
 
 def verify_user(username, password):
@@ -376,7 +462,7 @@ def delete_session(session_id, user_id):
 def list_users():
     conn = _get_conn()
     c = conn.cursor()
-    c.execute("SELECT id, username, role, created_at FROM users ORDER BY id ASC")
+    c.execute("SELECT id, username, role, created_at, provider FROM users ORDER BY id ASC")
     rows = c.fetchall()
     conn.close()
     return rows
@@ -695,22 +781,64 @@ def get_payment_kpis():
     }
 
 
-def get_revenue_trends(days=30):
-    """Returns daily revenue for the last N days."""
+def get_revenue_trends(period="30d"):
+    """
+    Returns revenue data with appropriate granularity based on period.
+    Account for Tashkent time offset (UTC+5).
+    """
     conn = _get_conn()
     c = conn.cursor()
-    c.execute("""
-        SELECT date(created_at) as day, SUM(amount) as total
-        FROM transactions
-        WHERE status = 'success'
-        AND created_at >= date('now', ?)
-        GROUP BY day
-        ORDER BY day ASC
-    """, (f"-{days} days",))
+    
+    if period == "1d":
+        c.execute("""
+            SELECT strftime('%Y-%m-%d %H:00', created_at, '+5 hours') as period, SUM(amount) as total
+            FROM transactions
+            WHERE status = 'success'
+            AND datetime(created_at, '+5 hours') >= datetime('now', '+5 hours', '-1 day')
+            GROUP BY strftime('%Y-%m-%d %H:00', created_at, '+5 hours')
+            ORDER BY period ASC
+        """)
+    elif period == "7d":
+        c.execute("""
+            SELECT date(created_at, '+5 hours') as period, SUM(amount) as total
+            FROM transactions
+            WHERE status = 'success'
+            AND datetime(created_at, '+5 hours') >= datetime('now', '+5 hours', '-7 days')
+            GROUP BY date(created_at, '+5 hours')
+            ORDER BY period ASC
+        """)
+    elif period == "30d":
+        c.execute("""
+            SELECT date(created_at, '+5 hours') as period, SUM(amount) as total
+            FROM transactions
+            WHERE status = 'success'
+            AND datetime(created_at, '+5 hours') >= datetime('now', '+5 hours', '-30 days')
+            GROUP BY date(created_at, '+5 hours')
+            ORDER BY period ASC
+        """)
+    elif period == "1y":
+        c.execute("""
+            SELECT strftime('%Y-%m', created_at, '+5 hours') as period, SUM(amount) as total
+            FROM transactions
+            WHERE status = 'success'
+            AND datetime(created_at, '+5 hours') >= datetime('now', '+5 hours', '-1 year')
+            GROUP BY strftime('%Y-%m', created_at, '+5 hours')
+            ORDER BY period ASC
+        """)
+    else:
+        c.execute("""
+            SELECT date(created_at, '+5 hours') as period, SUM(amount) as total
+            FROM transactions
+            WHERE status = 'success'
+            AND datetime(created_at, '+5 hours') >= datetime('now', '+5 hours', '-30 days')
+            GROUP BY date(created_at, '+5 hours')
+            ORDER BY period ASC
+        """)
+    
     rows = c.fetchall()
     conn.close()
     
-    return [{"day": row[0], "total": row[1]} for row in rows]
+    return [{"period": row[0], "total": row[1]} for row in rows]
 
 
 # Initialize DB on first run

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 import streamlit as st
@@ -25,8 +25,11 @@ if not st.session_state.get("authenticated"):
 require_admin()
 render_sidebar(active="payments")
 
+# Account for Tashkent time (UTC+5)
+tashkent_now = datetime.utcnow() + timedelta(hours=5)
+
 # Log for debugging (will only show in console)
-print(f"Rendering Payments page for user: {st.session_state.get('username')}")
+print(f"Rendering Payments page for user: {st.session_state.get('username')} at {tashkent_now}")
 
 st.title("Payments & Subscriptions")
 
@@ -52,25 +55,66 @@ with col3:
 st.write("")
 
 # --- VISUAL ANALYTICS ---
-st.subheader("Revenue Trends (Last 30 Days)")
-with st.spinner("Calculating trends..."):
+st.subheader("Revenue Trends")
+
+period_options = {
+    "Last Day (Hourly)": "1d",
+    "Last Week (Daily)": "7d",
+    "Last 30 Days (Daily)": "30d",
+    "Last Year (Monthly)": "1y"
+}
+
+period_labels = list(period_options.keys())
+period_values = list(period_options.values())
+
+selected_period_label = st.selectbox("Select Time Period", options=period_labels, index=0)
+selected_period = period_options[selected_period_label]
+
+period_label_map = {
+    "1d": "Last 24 Hours",
+    "7d": "Last 7 Days",
+    "30d": "Last 30 Days",
+    "1y": "Last 12 Months"
+}
+
+with st.spinner(f"Calculating trends - {period_label_map[selected_period]}..."):
     try:
-        revenue_data = db.get_revenue_trends(30)
+        revenue_data = db.get_revenue_trends(selected_period)
     except Exception as e:
         st.error(f"Error loading revenue trends: {e}")
         revenue_data = []
 
 if revenue_data:
     rev_df = pd.DataFrame(revenue_data)
-    rev_df['day'] = pd.to_datetime(rev_df['day'])
-    rev_df = rev_df.set_index('day')
-    # Fill missing dates with 0
-    all_days = pd.date_range(start=rev_df.index.min(), end=datetime.now().date(), freq='D')
-    rev_df = rev_df.reindex(all_days, fill_value=0)
     
-    st.area_chart(rev_df['total'], color="#0077b6", height=250)
+    if selected_period == "1d":
+        rev_df['period'] = pd.to_datetime(rev_df['period'], format='%Y-%m-%d %H:00')
+        rev_df = rev_df.set_index('period')
+        all_periods = pd.date_range(start=rev_df.index.min(), end=tashkent_now, freq='h')
+        rev_df = rev_df.reindex(all_periods, fill_value=0)
+        chart_label = "Hourly Revenue"
+    elif selected_period == "1y":
+        rev_df['period'] = pd.to_datetime(rev_df['period'], format='%Y-%m')
+        rev_df = rev_df.set_index('period')
+        all_periods = pd.date_range(start=rev_df.index.min(), end=tashkent_now, freq='MS')
+        rev_df = rev_df.reindex(all_periods, fill_value=0)
+        chart_label = "Monthly Revenue"
+    else:
+        rev_df['period'] = pd.to_datetime(rev_df['period'])
+        rev_df = rev_df.set_index('period')
+        end_date = tashkent_now.date()
+        if selected_period == "7d":
+            all_periods = pd.date_range(start=rev_df.index.min(), end=end_date, freq='D')
+        else:
+            all_periods = pd.date_range(start=rev_df.index.min(), end=end_date, freq='D')
+        rev_df = rev_df.reindex(all_periods, fill_value=0)
+        chart_label = "Daily Revenue"
+    
+    st.area_chart(rev_df['total'], color="#0077b6", height=250, use_container_width=True)
 else:
-    st.info("No successful transactions recorded in the last 30 days.")
+    st.info(f"No successful transactions recorded in the {period_label_map[selected_period].lower()}.")
+
+st.write("")
 
 # --- B. SANDBOX: GENERATE TEST PAYMENT ---
 with st.container():

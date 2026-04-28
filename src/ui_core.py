@@ -54,60 +54,137 @@ def init_auth_state():
     st.session_state.setdefault("authenticated", False)
     st.session_state.setdefault("user_id", None)
     st.session_state.setdefault("username", None)
-    st.session_state.setdefault("role", None)
+    st.session_state.setdefault("role", "user")
     st.session_state.setdefault("session_id", None)
     st.session_state.setdefault("rate_limit_timestamps", [])
 
 
 def logout():
-    for key in ["authenticated", "user_id", "username", "role", "session_id", "messages", "rate_limit_timestamps"]:
+    # Handle social logout if applicable
+    if st.user and st.user.get("is_logged_in", False):
+        st.logout()
+        
+    for key in ["authenticated", "user_id", "username", "role", "session_id", "messages", "rate_limit_timestamps", "picture", "provider"]:
         if key in st.session_state:
             del st.session_state[key]
     st.rerun()
 
 
 def show_login():
-    st.title("Secure Access")
-    if db.get_user_count() == 0:
-        st.info("No users found. Create the first admin account.")
-        with st.form("create_admin"):
-            username = st.text_input("Admin username")
-            password = st.text_input("Password", type="password")
-            confirm = st.text_input("Confirm password", type="password")
-            submitted = st.form_submit_button("Create admin")
-        if submitted:
-            if not username or not password:
-                st.error("Username and password are required.")
-            elif password != confirm:
-                st.error("Passwords do not match.")
-            else:
-                try:
-                    user_id = db.create_user(username, password, role="admin")
-                    db.assign_legacy_sessions(user_id)
-                    st.success("Admin account created. Please log in.")
-                    st.rerun()
-                except db.IntegrityError:
-                    st.error("Username already exists.")
-        return
-
-    with st.form("login_form"):
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        submitted = st.form_submit_button("Login")
-    if submitted:
-        user = db.verify_user(username, password)
-        if user:
-            st.session_state.authenticated = True
-            st.session_state.user_id = user["id"]
-            st.session_state.username = user["username"]
-            st.session_state.role = user["role"]
-            st.session_state.rate_limit_timestamps = []
-            for key in ["session_id", "messages"]:
-                if key in st.session_state:
-                    del st.session_state[key]
+    # Identity & Merging Logic for Social Login
+    # This handles the redirect back from Google
+    if st.user and st.user.get("is_logged_in", False) and not st.session_state.get("authenticated"):
+        from src.auth_logic import process_post_login_identity
+        process_post_login_identity()
+        if st.session_state.get("authenticated"):
             st.rerun()
-        else:
-            st.error("Invalid username or password.")
+
+    st.markdown("""
+        <style>
+        .login-container {
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 2rem;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+        }
+        .login-header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        .divider {
+            display: flex;
+            align-items: center;
+            text-align: center;
+            margin: 1.5rem 0;
+            color: #7b8a9f;
+        }
+        .divider::before, .divider::after {
+            content: '';
+            flex: 1;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        .divider:not(:empty)::before { margin-right: .5em; }
+        .divider:not(:empty)::after { margin-left: .5em; }
+        </style>
+    """, unsafe_allow_html=True)
+
+    with st.container():
+        st.markdown('<div class="login-container">', unsafe_allow_html=True)
+        st.markdown('<div class="login-header"><h2>Secure Access</h2><p>Choose your preferred login method</p></div>', unsafe_allow_html=True)
+
+        if db.get_user_count() == 0:
+            st.info("No users found. Create the first admin account.")
+            with st.form("create_admin"):
+                username = st.text_input("Admin username")
+                password = st.text_input("Password", type="password")
+                confirm = st.text_input("Confirm password", type="password")
+                submitted = st.form_submit_button("Create admin", use_container_width=True)
+            if submitted:
+                if not username or not password:
+                    st.error("Username and password are required.")
+                elif password != confirm:
+                    st.error("Passwords do not match.")
+                else:
+                    try:
+                        user_id = db.create_user(username, password, role="admin")
+                        db.assign_legacy_sessions(user_id)
+                        st.success("Admin account created. Please log in.")
+                        st.rerun()
+                    except db.IntegrityError:
+                        st.error("Username already exists.")
+            st.markdown('</div>', unsafe_allow_html=True)
+            return
+
+        col1, divider, col3 = st.columns([1, 0.2, 1])
+
+        with col1:
+            st.markdown("#### Local Privacy")
+            with st.form("local_login"):
+                username = st.text_input("Username")
+                password = st.text_input("Password", type="password")
+                submit = st.form_submit_button("Sign In", use_container_width=True)
+                
+            if submit:
+                # Check if it's an email or username
+                if "@" in username:
+                    user = db.get_user_by_email(username)
+                else:
+                    user = db.get_user_by_username(username)
+                
+                if user and user.get("password_hash") == "EXTERNAL_SOCIAL_AUTH":
+                    st.warning("This account uses Google Sign-In. Please use the 'Continue with Google' button or reset your password via Google Account settings.")
+                elif user and user.get("password_hash") and db._check_password(password, user["password_hash"]):
+                    st.session_state.authenticated = True
+                    st.session_state.user_id = user["id"]
+                    st.session_state.username = user["username"]
+                    st.session_state.role = user["role"]
+                    st.session_state.picture = user.get("picture")
+                    st.session_state.provider = user.get("provider", "local")
+                    st.session_state.rate_limit_timestamps = []
+                    for key in ["session_id", "messages"]:
+                        if key in st.session_state:
+                            del st.session_state[key]
+                    st.rerun()
+                elif user and not user.get("password_hash"):
+                    st.error("This account uses Google Sign-In. Please log in with Google.")
+                else:
+                    st.error("Invalid credentials.")
+            
+            st.markdown('<p style="font-size: 0.85rem; text-align: center;"><a href="#">Forgot Password?</a></p>', unsafe_allow_html=True)
+
+        with divider:
+            st.markdown('<div style="height: 100%; border-left: 1px solid #eee; margin: 0 auto; width: 1px;"></div>', unsafe_allow_html=True)
+
+        with col3:
+            st.markdown("#### Social Convenience")
+            st.write("Fast and secure access using your Google account.")
+            st.info("💡 First-time users will have an account created automatically.")
+            if st.button("Continue with Google", type="primary", use_container_width=True):
+                st.login("google")
+
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
 def require_admin():
@@ -118,11 +195,29 @@ def require_admin():
 
 def render_sidebar(active="chat"):
     with st.sidebar:
-        st.markdown(
-            f"""<div class=\"sidebar-brand\"><b>Semantic Search Assistant</b><br/>{st.session_state.get("username")} ({st.session_state.get("role")})</div>""",
-            unsafe_allow_html=True,
-        )
+        user_img = st.session_state.get("picture")
+        username = st.session_state.get("username")
+        role = st.session_state.get("role")
+        
+        if user_img:
+            st.markdown(
+                f"""
+                <div class="sidebar-brand" style="display: flex; align-items: center; gap: 10px;">
+                    <img src="{user_img}" style="width: 40px; height: 40px; border-radius: 50%; border: 2px solid #0077b6;">
+                    <div><b>{username}</b><br/><span style="font-size: 0.8rem; color: #7b8a9f;">{role.title()}</span></div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+        else:
+            st.markdown(
+                f"""<div class="sidebar-brand"><b>Semantic Search Assistant</b><br/>{username} ({role})</div>""",
+                unsafe_allow_html=True,
+            )
+            
         if st.button("Logout", use_container_width=True):
+            if st.session_state.get("provider") == "google":
+                st.logout()
             logout()
 
         if st.session_state.get("role") == "admin":
@@ -241,16 +336,25 @@ def run_rag_with_status(prompt):
 
 def render_chat_sidebar_section():
     st.markdown("<div class=\"section-title\">Chat History</div>", unsafe_allow_html=True)
-    if st.button("New chat", use_container_width=True):
+    
+    # Check if the current chat is "new" (has no messages) to prevent ghost chats
+    is_new_chat = not st.session_state.get("messages")
+    
+    if st.button("New chat", use_container_width=True, disabled=is_new_chat):
         new_chat()
         st.rerun()
     current_session_id = st.session_state.get("session_id")
     sessions = list(db.get_sessions(st.session_state.user_id))
-    for idx, (s_id, s_title, _) in enumerate(sessions):
+    
+    for s_id, s_title, _ in sessions:
         is_current = s_id == current_session_id
         title = (s_title or "").strip()
+        
+        # Only show sessions that have a generated title (i.e., not "New Chat")
+        # This prevents empty "ghost" chats from appearing in the history list.
         if not title or title.lower() == "new chat":
-            title = f"Chat {idx + 1}"
+            continue
+            
         label = title if len(title) <= 28 else title[:26] + ".."
         if st.button(label, key=f"session_{s_id}", disabled=is_current, use_container_width=True):
             load_chat(s_id)

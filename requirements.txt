@@ -15,3 +15,4 @@ pywebview
 python-docx
 google-genai
 requests
+Authlib

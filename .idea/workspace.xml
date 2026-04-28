@@ -4,8 +4,15 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="e2fe880d-02c6-4679-ac67-a0df315b253c" name="Changes" comment="fix: update README.md, UI, and add API monitoring">
-      <change afterPath="$PROJECT_DIR$/PROJECT.md" afterDir="false" />
+    <list default="true" id="e2fe880d-02c6-4679-ac67-a0df315b253c" name="Changes" comment="feat: implement payments and add API">
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/pages/admin_payments.py" beforeDir="false" afterPath="$PROJECT_DIR$/pages/admin_payments.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/pages/manage.py" beforeDir="false" afterPath="$PROJECT_DIR$/pages/manage.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/settings.json" beforeDir="false" afterPath="$PROJECT_DIR$/settings.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/chat_storage.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/chat_storage.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/ui_core.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/ui_core.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -13,7 +20,7 @@
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="38" />
+    <option name="cachedIndexableFilesCount" value="41" />
     <option name="fileBasedEmbeddingIndicesEnabled" value="true" />
   </component>
   <component name="FileTemplateManagerImpl">
@@ -118,6 +125,8 @@
       <workItem from="1777103959865" duration="1029000" />
       <workItem from="1777122551081" duration="484000" />
       <workItem from="1777308969875" duration="2781000" />
+      <workItem from="1777340484613" duration="1041000" />
+      <workItem from="1777357903359" duration="306000" />
     </task>
     <task id="LOCAL-00001" summary="fix: update README.md and UI">
       <option name="closed" value="true" />
@@ -167,7 +176,15 @@
       <option name="project" value="LOCAL" />
       <updated>1777314569206</updated>
     </task>
-    <option name="localTasksCounter" value="7" />
+    <task id="LOCAL-00007" summary="feat: implement payments and add API">
+      <option name="closed" value="true" />
+      <created>1777340691112</created>
+      <option name="number" value="00007" />
+      <option name="presentableId" value="LOCAL-00007" />
+      <option name="project" value="LOCAL" />
+      <updated>1777340691112</updated>
+    </task>
+    <option name="localTasksCounter" value="8" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -180,7 +197,8 @@
     <MESSAGE value="feat: implement session management and statistics panel" />
     <MESSAGE value="feat: implement API usage monitoring" />
     <MESSAGE value="fix: update README.md, UI, and add API monitoring" />
-    <option name="LAST_COMMIT_MESSAGE" value="fix: update README.md, UI, and add API monitoring" />
+    <MESSAGE value="feat: implement payments and add API" />
+    <option name="LAST_COMMIT_MESSAGE" value="feat: implement payments and add API" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/BISP_Project_00016417$pipeline.coverage" NAME="pipeline Coverage Results" MODIFIED="1776600397763" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/src" />

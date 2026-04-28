@@ -35,7 +35,7 @@ render_sidebar(active="manage")
 st.title("Application Management")
 
 users = db.list_users()
-user_map = {f"{u[1]} (id {u[0]}, {u[2]})": u[0] for u in users}
+user_map = {f"{u[1]} (id {u[0]}, {u[4]})": u[0] for u in users}
 
 
 def select_folders_with_tk(initial_dir=None):
@@ -463,7 +463,7 @@ with st.container():
     st.subheader("Session Management")
 
     admin_user_options = {"All users": None}
-    admin_user_options.update({f"{u[1]} (id {u[0]}, {u[2]})": u[0] for u in users})
+    admin_user_options.update({f"{u[1]} (id {u[0]}, {u[4]})": u[0] for u in users})
     selected_user_label = st.selectbox("Filter sessions by user", list(admin_user_options.keys()))
     selected_user_id = admin_user_options[selected_user_label]
 
