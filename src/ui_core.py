@@ -128,9 +128,9 @@ def render_sidebar(active="chat"):
         if st.session_state.get("role") == "admin":
             st.markdown("<div class=\"section-title\">Navigation</div>", unsafe_allow_html=True)
 
-            nav_options = ["Dashboard", "Manage", "Chat"]
-            nav_icons = ["speedometer2", "folder-symlink", "chat-right-text"]
-            active_to_index = {"dashboard": 0, "manage": 1, "chat": 2}
+            nav_options = ["Dashboard", "Payments", "Manage", "Chat"]
+            nav_icons = ["speedometer2", "credit-card", "folder-symlink", "chat-right-text"]
+            active_to_index = {"dashboard": 0, "payments": 1, "manage": 2, "chat": 3}
 
             selected = option_menu(
                 menu_title=None,
@@ -142,6 +142,7 @@ def render_sidebar(active="chat"):
 
             target_pages = {
                 "Dashboard": "pages/dashboard.py",
+                "Payments": "pages/admin_payments.py",
                 "Manage": "pages/manage.py",
                 "Chat": "pages/chat.py",
             }

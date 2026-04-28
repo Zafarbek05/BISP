@@ -175,6 +175,20 @@ def init_db():
         if "output_tokens" not in usage_columns:
             c.execute("ALTER TABLE gemini_usage ADD COLUMN output_tokens INTEGER")
 
+        # Table for Transactions
+        c.execute('''CREATE TABLE IF NOT EXISTS transactions
+                     (
+                         id INTEGER PRIMARY KEY AUTOINCREMENT,
+                         user_id INTEGER,
+                         amount REAL NOT NULL,
+                         currency TEXT DEFAULT 'UZS',
+                         provider TEXT NOT NULL,
+                         status TEXT DEFAULT 'pending',
+                         external_id TEXT,
+                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                         FOREIGN KEY (user_id) REFERENCES users (id)
+                     )''')
+
         conn.commit()
     except MemoryError as exc:
         raise RuntimeError(
@@ -586,6 +600,117 @@ def get_available_models():
         return models
     except Exception:
         return []
+
+
+# --- PAYMENT HELPER FUNCTIONS ---
+
+def create_order(user_id, amount, provider):
+    """Inserts a 'pending' transaction record and returns a unique order_id."""
+    conn = _get_conn()
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO transactions (user_id, amount, provider, status) VALUES (?, ?, ?, 'pending')",
+        (user_id, amount, provider)
+    )
+    order_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return order_id
+
+
+def get_transactions():
+    """Returns all transactions with username."""
+    conn = _get_conn()
+    c = conn.cursor()
+    c.execute("""
+        SELECT t.id, t.user_id, u.username, t.amount, t.currency, t.provider, t.status, t.external_id, t.created_at
+        FROM transactions t
+        LEFT JOIN users u ON t.user_id = u.id
+        ORDER BY t.created_at DESC
+    """)
+    rows = c.fetchall()
+    conn.close()
+    
+    transactions = []
+    for row in rows:
+        transactions.append({
+            "id": row[0],
+            "user_id": row[1],
+            "username": row[2] or "Unknown",
+            "amount": row[3],
+            "currency": row[4],
+            "provider": row[5],
+            "status": row[6],
+            "external_id": row[7],
+            "created_at": row[8]
+        })
+    return transactions
+
+
+def update_transaction_status(transaction_id, status, external_id=None):
+    """Updates the status of a transaction."""
+    conn = _get_conn()
+    c = conn.cursor()
+    if external_id:
+        c.execute("UPDATE transactions SET status = ?, external_id = ? WHERE id = ?", (status, external_id, transaction_id))
+    else:
+        c.execute("UPDATE transactions SET status = ? WHERE id = ?", (status, transaction_id))
+    conn.commit()
+    conn.close()
+
+
+def get_payment_kpis():
+    """Returns financial KPIs for the payments dashboard."""
+    conn = _get_conn()
+    c = conn.cursor()
+    
+    # 1. Total Revenue (MTD)
+    c.execute("""
+        SELECT SUM(amount) FROM transactions 
+        WHERE status = 'success' 
+        AND strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now')
+    """)
+    revenue_mtd = c.fetchone()[0] or 0.0
+    
+    # 2. Conversion Rate
+    c.execute("SELECT COUNT(*) FROM transactions WHERE status = 'success'")
+    success_count = c.fetchone()[0] or 0
+    c.execute("SELECT COUNT(*) FROM transactions")
+    total_count = c.fetchone()[0] or 0
+    conv_rate = (success_count / total_count * 100) if total_count > 0 else 0.0
+    
+    # 3. Active Subscriptions (last 30 days)
+    c.execute("""
+        SELECT COUNT(DISTINCT user_id) FROM transactions 
+        WHERE status = 'success' 
+        AND created_at >= date('now', '-30 days')
+    """)
+    active_subs = c.fetchone()[0] or 0
+    
+    conn.close()
+    return {
+        "revenue_mtd": revenue_mtd,
+        "conversion_rate": conv_rate,
+        "active_subscriptions": active_subs
+    }
+
+
+def get_revenue_trends(days=30):
+    """Returns daily revenue for the last N days."""
+    conn = _get_conn()
+    c = conn.cursor()
+    c.execute("""
+        SELECT date(created_at) as day, SUM(amount) as total
+        FROM transactions
+        WHERE status = 'success'
+        AND created_at >= date('now', ?)
+        GROUP BY day
+        ORDER BY day ASC
+    """, (f"-{days} days",))
+    rows = c.fetchall()
+    conn.close()
+    
+    return [{"day": row[0], "total": row[1]} for row in rows]
 
 
 # Initialize DB on first run

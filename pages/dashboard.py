@@ -82,32 +82,30 @@ with st.container():
                     st.error(f"Gemini API Error: {e}")
             return
 
-        # Model Selection
+        # Metrics display
+        m_col1, m_col2, m_col3 = container.columns(3)
+        
+        # RPM usage
+        rpm_limit = latest_usage.get('limit_rpm') or 15
+        rpm_rem = latest_usage.get('remaining_rpm')
+
+                # Model Selection
         selected_model = container.selectbox(
             "Select Model for Rate Limit Analysis",
             options=available_models if available_models else [latest_usage.get('model_name')],
             index=0
         )
-
-        # Metrics display
-        m_col1, m_col2, m_col3, m_col4 = container.columns(4)
-        
-        # RPM usage
-        rpm_limit = latest_usage.get('limit_rpm') or 15 # Default for free tier
-        rpm_rem = latest_usage.get('remaining_rpm')
         
         with m_col1:
             st.metric("RPM Limit", rpm_limit)
-        with m_col2:
-            st.metric("RPM Remaining", rpm_rem if rpm_rem is not None else "N/A")
-            
+        
         # Quota usage
         q_consumed_total = summary['total_consumed'] if summary else 0
         q_limit = latest_usage.get('quota_total') or 1000000 # Default fallback
         
-        with m_col3:
+        with m_col2:
             st.metric("Total Tokens (Today)", f"{q_consumed_total:,}")
-        with m_col4:
+        with m_col3:
             st.metric("Daily Quota", f"{q_limit:,}")
 
         # Visual progress bars
@@ -141,9 +139,31 @@ with st.container():
             st.warning(f"Warning: Token quota usage is at {q_usage_pct:.1f}%")
 
         # Peak Usage Graphs (AI Studio Style)
-        st.subheader("Rate Limit Usage (Peaks)")
-        st.caption("10-minute peak tracking for the last 4 hours (Tashkent Time).")
-        history = db.get_gemini_usage_history(days=1, model_name=selected_model)
+        st.subheader("Rate Limit Usage ")
+        
+        zoom_options = {
+            "1 Minute (1h window)": ("1min", 1),
+            "5 Minutes (4h window)": ("5min", 4),
+            "10 Minutes (6h window)": ("10min", 6),
+            "30 Minutes (12h window)": ("30min", 12),
+            "1 Hour (24h window)": ("1h", 24),
+            "6 Hours (7d window)": ("6h", 168) # 7 days
+        }
+        
+        z_col1, z_col2 = st.columns([1, 2])
+        with z_col1:
+            zoom_label = st.selectbox(
+                "Time Zoom Level",
+                options=list(zoom_options.keys()),
+                index=2 # Default to 10 min
+            )
+        
+        interval_code, lookback_hours = zoom_options[zoom_label]
+        st.caption(f"{zoom_label} tracking (Tashkent Time).")
+        
+        # Get enough history for the lookback
+        days_to_fetch = max(1, lookback_hours // 24 + 1)
+        history = db.get_gemini_usage_history(days=days_to_fetch, model_name=selected_model)
         
         if history:
             df = pd.DataFrame(history)
@@ -159,8 +179,8 @@ with st.container():
                 'input_tokens': 'sum'
             }).rename(columns={'timestamp': 'rpm', 'input_tokens': 'tpm'})
             
-            # 2. Find the peak (max) RPM/TPM for each 10-minute window
-            minute_usage['window'] = minute_usage.index.floor('10min')
+            # 2. Find the peak (max) RPM/TPM for each selected window
+            minute_usage['window'] = minute_usage.index.floor(interval_code)
             window_peaks = minute_usage.groupby('window').agg({
                 'rpm': 'max',
                 'tpm': 'max'
@@ -170,15 +190,17 @@ with st.container():
             now_tashkent = pd.Timestamp.utcnow() + pd.Timedelta(hours=5)
             now_tashkent = now_tashkent.replace(tzinfo=None)
             
-            # Show last 4 hours for better detail
-            end_time = now_tashkent.floor('10min')
-            start_time = end_time - pd.Timedelta(hours=4)
+            end_time = now_tashkent.floor(interval_code)
+            start_time = end_time - pd.Timedelta(hours=lookback_hours)
             
-            all_windows = pd.date_range(start=start_time, end=end_time, freq='10min')
+            all_windows = pd.date_range(start=start_time, end=end_time, freq=interval_code)
             plot_df = window_peaks.reindex(all_windows, fill_value=0)
             
-            # Format index for clear display (e.g., "14:10")
-            plot_df.index = plot_df.index.strftime('%H:%M')
+            # Format index based on interval
+            if interval_code == "1h" or interval_code == "6h":
+                plot_df.index = plot_df.index.strftime('%m-%d %H:00')
+            else:
+                plot_df.index = plot_df.index.strftime('%H:%M')
             
             # RPD history (7 days)
             daily_rpd_history = db.get_gemini_usage_history(days=7, model_name=selected_model)

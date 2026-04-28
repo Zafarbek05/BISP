@@ -9,9 +9,9 @@ sqlcipher3==0.6.2
 streamlit==1.56.0
 streamlit-lottie
 streamlit-option-menu
-requests
 watchdog==6.0.0
 torchvision
 pywebview
 python-docx
 google-genai
+requests
